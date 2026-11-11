@@ -1,0 +1,70 @@
+<!doctype html><html lang="ru"><head><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<title>Mikaela VPN</title>
+<style>
+:root{--bg:#0b0f1a;--card:#141a2b;--tx:#e8ecf8;--mut:#8b94b0;--ac:#7c5cff;--ok:#29d391;--err:#ff6b6b}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--tx);font:14px 'Segoe UI',sans-serif;height:100vh;display:flex;flex-direction:column;padding:22px}
+h1{font-size:20px;margin:0 0 4px}.mut{color:var(--mut)}.hide{display:none!important}
+.card{background:var(--card);border-radius:14px;padding:16px;margin-top:14px}
+input,select{width:100%;padding:12px;margin-top:10px;border-radius:10px;border:1px solid #232b45;background:#0e1424;color:var(--tx);font-size:14px}
+button{cursor:pointer;border:0;border-radius:10px;padding:12px;background:var(--ac);color:#fff;font-size:14px;font-weight:600;width:100%;margin-top:12px}
+button.ghost{background:transparent;border:1px solid #232b45;color:var(--mut)}
+#err{color:var(--err);margin-top:10px;min-height:18px;font-size:13px}
+#big{width:150px;height:150px;border-radius:50%;margin:26px auto 8px;display:block;font-size:16px;background:#1b2340;border:3px solid #2a3560;transition:.2s}
+#big.on{background:#12382c;border-color:var(--ok);box-shadow:0 0 30px #29d39155}
+.bar{height:6px;background:#0e1424;border-radius:4px;margin-top:8px;overflow:hidden}.bar i{display:block;height:100%;background:var(--ac)}
+.seg{display:flex;gap:8px}.seg button{margin:0;background:#1b2340}.seg button.act{background:var(--ac)}
+.row{display:flex;justify-content:space-between;margin-top:6px}
+</style></head><body>
+<div id="login" class="hide">
+  <h1>Mikaela VPN</h1><div class="mut">Войдите данными из бота / кабинета</div>
+  <div class="card"><input id="em" type="email" placeholder="Email"><input id="pw" type="password" placeholder="Пароль">
+  <button id="go">Войти</button><div id="err"></div>
+  <button class="ghost" onclick="vpn.openCabinet()">Нет аккаунта? Открыть кабинет</button></div>
+</div>
+<div id="main" class="hide">
+  <div class="row"><div><h1>Mikaela VPN</h1><div class="mut" id="who"></div></div><button class="ghost" style="width:auto;margin:0;padding:8px 12px" id="out">Выйти</button></div>
+  <button id="big">Подключить</button><div id="st" class="mut" style="text-align:center">Отключено</div>
+  <div class="card seg"><button data-m="tun" class="act">Весь трафик (TUN)</button><button data-m="proxy">Системный прокси</button></div>
+  <div class="card" id="srv"><div class="mut">Сервер</div><select id="sel"></select></div>
+  <div class="card"><div class="row"><span class="mut">Тариф</span><b id="tar">—</b></div>
+  <div class="row"><span class="mut">Осталось</span><b id="left">—</b></div>
+  <div class="row"><span class="mut">Трафик</span><b id="tr">—</b></div><div class="bar"><i id="trb" style="width:0"></i></div>
+  <button class="ghost" onclick="vpn.openCabinet()">Продлить / оплатить</button></div>
+  <div id="err2" style="color:var(--err);font-size:13px;margin-top:10px"></div>
+</div>
+<script>
+const $=id=>document.getElementById(id);let mode='tun',on=false,busy=false;
+const show=v=>{$('login').classList.toggle('hide',v!=='login');$('main').classList.toggle('hide',v!=='main')};
+async function init(){const r=await vpn.session();if(r.data){enter(r.data)}else show('login')}
+async function enter(u){show('main');$('who').textContent=u.email||u.username||'';await refreshSub();poll()}
+$('go').onclick=async()=>{$('err').textContent='';const r=await vpn.login($('em').value.trim(),$('pw').value);r.ok?enter(r.data):$('err').textContent=r.error};
+$('pw').onkeydown=e=>e.key==='Enter'&&$('go').click();
+$('out').onclick=async()=>{await vpn.logout();show('login')};
+document.querySelectorAll('.seg button').forEach(b=>b.onclick=()=>{if(on)return;mode=b.dataset.m;document.querySelectorAll('.seg button').forEach(x=>x.classList.toggle('act',x===b))});
+async function refreshSub(){
+  const r=await vpn.sub();if(!r.ok){if(r.error==='AUTH')return show('login');return $('err2').textContent=r.error}
+  const s=r.data.subscription;if(!s){$('tar').textContent='нет подписки';return}
+  $('tar').textContent=s.tariff_name||(s.is_trial?'Пробный':'Подписка');
+  $('left').textContent=s.is_expired?'истекла':s.time_left_display||s.days_left+' дн.';
+  $('tr').textContent=s.traffic_limit_gb?`${s.traffic_used_gb.toFixed(1)} / ${s.traffic_limit_gb} ГБ`:`${s.traffic_used_gb.toFixed(1)} ГБ (безлимит)`;
+  $('trb').style.width=Math.min(100,s.traffic_used_percent||0)+'%';
+}
+$('big').onclick=async()=>{
+  if(busy)return;busy=true;$('err2').textContent='';
+  if(on){$('st').textContent='Отключаю…';await vpn.disconnect()}
+  else{$('st').textContent='Подключаю…';const r=await vpn.connect(mode);if(!r.ok)$('err2').textContent=r.error}
+  busy=false;poll();
+};
+async function poll(){
+  const r=await vpn.status();if(!r.ok)return;on=r.data.running;
+  $('big').classList.toggle('on',on);$('big').textContent=on?'Отключить':'Подключить';
+  if(!busy)$('st').textContent=on?'Подключено':'Отключено';
+  const g=r.data.groups[0];$('srv').classList.toggle('hide',!g);
+  if(g&&document.activeElement!==$('sel')){$('sel').innerHTML=g.all.map(n=>`<option ${n===g.now?'selected':''}>${n}</option>`).join('');$('sel').dataset.g=g.name}
+}
+$('sel').onchange=()=>vpn.select($('sel').dataset.g,$('sel').value);
+setInterval(()=>{if(!$('main').classList.contains('hide'))poll()},3000);
+setInterval(()=>{if(!$('main').classList.contains('hide'))refreshSub()},60000);
+init();
+</script></body></html>
