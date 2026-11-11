@@ -6,7 +6,7 @@ contextBridge.exposeInMainWorld('vpn', {
   tg: () => call('tg'), tgCancel: () => call('tgcancel'), webLogin: () => call('weblogin'), me: () => call('me'),
   sub: () => call('sub'), connect: (o) => call('connect', o), disconnect: () => call('disconnect'), status: () => call('status'),
   servers: (o) => call('servers', o), ping: (t) => call('ping', t), pick: (t) => call('pick', t),
-  devices: () => call('devices'), delDevice: (h) => call('deldevice', h),
+  devices: () => call('devices'), delDevice: (h) => call('deldevice', h), resetDevices: () => call('resetdevices'),
   methods: () => call('methods'), topup: (o) => call('topup', o),
   renewOptions: () => call('renewoptions'), renew: (d) => call('renew', d),
   openCabinet: () => call('cabinet'),
