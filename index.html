@@ -1,32 +1,40 @@
-<!doctype html><html lang="ru"><head><meta charset="utf-8">
+<!doctype html><html lang="ru" data-theme="dark"><head><meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
 <title>Mikaela VPN</title>
 <style>
-:root{--bg:#0b0f1a;--card:#141a2b;--tx:#e8ecf8;--mut:#8b94b0;--ac:#7c5cff;--ok:#29d391;--err:#ff6b6b}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--tx);font:14px 'Segoe UI',sans-serif;height:100vh;overflow-y:auto;padding:22px}
+:root,[data-theme=dark]{--bg:#0b0f1a;--card:#141a2b;--tx:#e8ecf8;--mut:#8b94b0;--ac:#7c5cff;--ok:#29d391;--err:#ff6b6b;--in:#0e1424;--bd:#232b45;--bt:#1b2340;--onbg:#12382c}
+[data-theme=gray]{--bg:#23262d;--card:#2f333c;--tx:#eceef3;--mut:#9aa1b2;--ac:#8a6dff;--in:#262a31;--bd:#454b59;--bt:#3b404b;--onbg:#27443c}
+[data-theme=light]{--bg:#eef0f6;--card:#ffffff;--tx:#151a2c;--mut:#6b7391;--ac:#6b4cf0;--err:#e5484d;--ok:#12a36b;--in:#f3f5fa;--bd:#d9deea;--bt:#e6e9f3;--onbg:#d9f6ea}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);font:14px 'Segoe UI',sans-serif;height:100vh;overflow-y:auto;padding:20px 20px 84px}
 h1{font-size:20px;margin:0 0 4px}.mut{color:var(--mut)}.hide{display:none!important}
 .card{background:var(--card);border-radius:14px;padding:16px;margin-top:14px}
-input,select{width:100%;padding:12px;margin-top:10px;border-radius:10px;border:1px solid #232b45;background:#0e1424;color:var(--tx);font-size:14px}
+input,select{width:100%;padding:12px;margin-top:10px;border-radius:10px;border:1px solid var(--bd);background:var(--in);color:var(--tx);font-size:14px}
 button{cursor:pointer;border:0;border-radius:10px;padding:12px;background:var(--ac);color:#fff;font-size:14px;font-weight:600;width:100%;margin-top:12px}
-button.ghost{background:transparent;border:1px solid #232b45;color:var(--mut)}
+button.ghost{background:transparent;border:1px solid var(--bd);color:var(--mut)}
 button.tg{background:#229ed9}
 a{color:var(--ac);cursor:pointer;font-size:13px}
 .pw{position:relative}.pw button{position:absolute;right:6px;top:14px;width:auto;margin:0;padding:6px 10px;background:transparent;color:var(--mut);font-size:12px}
 .pw input{padding-right:70px}
-.tabs{display:flex;gap:8px}.tabs button{margin:0;background:#1b2340}.tabs button.act{background:var(--ac)}
+.seg{display:flex;gap:8px}.seg button{margin:0;background:var(--bt);color:var(--tx)}.seg button.act{background:var(--ac);color:#fff}
 #msg{margin-top:10px;min-height:18px;font-size:13px}.e{color:var(--err)}.g{color:var(--ok)}
 .sep{text-align:center;color:var(--mut);margin:14px 0 2px;font-size:12px}
-#big{width:150px;height:150px;border-radius:50%;margin:20px auto 8px;display:block;font-size:16px;background:#1b2340;border:3px solid #2a3560;transition:.2s}
-#big.on{background:#12382c;border-color:var(--ok);box-shadow:0 0 30px #29d39155}
-.bar{height:6px;background:#0e1424;border-radius:4px;margin-top:8px;overflow:hidden}.bar i{display:block;height:100%;background:var(--ac)}
-.seg{display:flex;gap:8px}.seg button{margin:0;background:#1b2340}.seg button.act{background:var(--ac)}
-.row{display:flex;justify-content:space-between;margin-top:6px}
+#big{width:150px;height:150px;border-radius:50%;margin:18px auto 8px;display:block;font-size:16px;background:var(--bt);color:var(--tx);border:3px solid var(--bd);transition:.2s}
+#big.on{background:var(--onbg);border-color:var(--ok);box-shadow:0 0 30px #29d39155}
+.bar{height:6px;background:var(--in);border-radius:4px;margin-top:8px;overflow:hidden}.bar i{display:block;height:100%;background:var(--ac)}
+.row{display:flex;justify-content:space-between;align-items:center;margin-top:6px}
+.fl{display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:50%;color:#fff;font-size:12px;font-weight:700;flex:none}
+.srv{display:flex;gap:12px;align-items:center;padding:10px 4px;border-bottom:1px solid var(--bd);cursor:pointer}
+.srv:last-child{border:0}.srv.sel{background:var(--bt);border-radius:10px;padding-left:10px}
+.srv .n{font-weight:600}.srv .s{font-size:11px;color:var(--mut)}.srv .p{margin-left:auto;font-size:12px;color:var(--mut)}
+nav{position:fixed;left:0;right:0;bottom:0;display:flex;background:var(--card);border-top:1px solid var(--bd)}
+nav button{margin:0;border-radius:0;background:transparent;color:var(--mut);padding:16px 0}nav button.act{color:var(--ac)}
 </style></head><body>
 
 <div id="login">
   <h1>Mikaela VPN</h1><div class="mut">Аккаунт общий с ботом и кабинетом</div>
   <div class="card">
-    <div class="tabs"><button id="tL" class="act">Вход</button><button id="tR">Регистрация</button></div>
+    <div class="seg"><button id="tL" class="act">Вход</button><button id="tR">Регистрация</button></div>
     <input id="nm" class="hide" placeholder="Имя (необязательно)">
     <input id="em" type="email" placeholder="Email">
     <div class="pw"><input id="pw" type="password" placeholder="Пароль"><button id="eye" type="button">Показать</button></div>
@@ -35,37 +43,68 @@ a{color:var(--ac);cursor:pointer;font-size:13px}
     <div id="msg"></div>
     <div class="sep">или</div>
     <button class="tg" id="tg">Войти через Telegram</button>
-    <button class="ghost" id="web">Google / Яндекс / VK / Discord</button>
+    <button class="ghost" id="web">Войти через Google</button>
   </div>
 </div>
 
-<div id="main" class="hide">
-  <div class="row"><div><h1>Mikaela VPN</h1><div class="mut" id="who"></div></div><button class="ghost" style="width:auto;margin:0;padding:8px 12px" id="out">Выйти</button></div>
-  <button id="big">Подключить</button><div id="st" class="mut" style="text-align:center">Отключено</div>
-  <div class="card seg"><button data-m="tun" class="act">Весь трафик (TUN)</button><button data-m="proxy">Системный прокси</button></div>
-  <div class="card" id="srv"><div class="mut">Сервер</div><select id="sel"></select></div>
-  <div class="card">
-    <div class="row"><span class="mut">Баланс</span><b id="bal">—</b></div>
-    <div class="row"><span class="mut">Тариф</span><b id="tar">—</b></div>
-    <div class="row"><span class="mut">Осталось</span><b id="left">—</b></div>
-    <div class="row"><span class="mut">Устройства</span><b id="dev">—</b></div>
-    <div class="row"><span class="mut">Трафик</span><b id="tr">—</b></div><div class="bar"><i id="trb" style="width:0"></i></div>
-    <button class="ghost" onclick="vpn.openCabinet()">Пополнить / продлить в кабинете</button></div>
-  <div id="err2" style="color:var(--err);font-size:13px;margin-top:10px"></div>
+<div id="app" class="hide">
+  <section id="pHome">
+    <div class="mut" id="who"></div>
+    <button id="big">Подключить</button><div id="st" class="mut" style="text-align:center">Отключено</div>
+    <div class="card row" id="curSrv" style="cursor:pointer"><span class="mut">Сервер</span><span id="curName" style="font-weight:600">Авто</span></div>
+    <div class="card seg"><button data-m="tun">Весь трафик (TUN)</button><button data-m="proxy">Системный прокси</button></div>
+    <div class="card">
+      <div class="row"><span class="mut">Баланс</span><b id="bal">—</b></div>
+      <div class="row"><span class="mut">Тариф</span><b id="tar">—</b></div>
+      <div class="row"><span class="mut">Осталось</span><b id="left">—</b></div>
+      <div class="row"><span class="mut">Устройства</span><b id="dev">—</b></div>
+      <div class="row"><span class="mut">Трафик</span><b id="tr">—</b></div><div class="bar"><i id="trb" style="width:0"></i></div>
+      <button class="ghost" onclick="vpn.openCabinet()">Пополнить / продлить в кабинете</button></div>
+    <div id="err2" class="e" style="font-size:13px;margin-top:10px"></div>
+  </section>
+
+  <section id="pSrv" class="hide">
+    <h1>Серверы</h1>
+    <div class="card"><div class="row" style="margin:0"><b>Mikaela VPN</b><span class="mut" id="subHead">—</span></div></div>
+    <div class="seg" style="margin-top:12px"><button id="pingAll">Тест пинга</button><button id="reload" class="ghost">Обновить</button></div>
+    <div class="card" id="list" style="padding:8px 12px"></div>
+    <div id="srvErr" class="e" style="font-size:13px;margin-top:10px"></div>
+  </section>
+
+  <section id="pSet" class="hide">
+    <h1>Настройки</h1>
+    <div class="card"><div class="mut">Тема</div>
+      <div class="seg" id="themes" style="margin-top:10px"><button data-t="light">Белая</button><button data-t="gray">Серая</button><button data-t="dark">Чёрная</button></div></div>
+    <div class="card"><div class="mut">Формат подписки</div>
+      <select id="fmt"><option value="auto">Авто (Xray JSON, затем sing-box)</option><option value="xray">Xray JSON (как в Happ)</option><option value="singbox">sing-box JSON</option></select></div>
+    <div class="card"><div class="mut" id="acc"></div>
+      <button class="ghost" onclick="vpn.openCabinet()">Открыть кабинет</button>
+      <button class="ghost" id="out">Выйти из аккаунта</button></div>
+  </section>
+
+  <nav><button data-p="pHome" class="act">Главная</button><button data-p="pSrv">Серверы</button><button data-p="pSet">Настройки</button></nav>
 </div>
 
 <script>
-const $=id=>document.getElementById(id);let mode='tun',on=false,busy=false,reg=false,tgWait=false;
-const show=v=>{$('login').classList.toggle('hide',v!=='login');$('main').classList.toggle('hide',v!=='main')};
+const $=id=>document.getElementById(id);
+const ls={get:(k,d)=>{try{return localStorage.getItem(k)||d}catch{return d}},set:(k,v)=>{try{localStorage.setItem(k,v)}catch{}}};
+const S={theme:ls.get('theme','dark'),fmt:ls.get('fmt','auto'),mode:ls.get('mode','tun'),server:ls.get('server',''),list:[],ping:{}};
+let on=false,busy=false,reg=false,tgWait=false;
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+/* ---------- тема ---------- */
+function applyTheme(t){S.theme=t;ls.set('theme',t);document.documentElement.dataset.theme=t;
+  document.querySelectorAll('#themes button').forEach(b=>b.classList.toggle('act',b.dataset.t===t))}
+document.querySelectorAll('#themes button').forEach(b=>b.onclick=()=>applyTheme(b.dataset.t));
+applyTheme(S.theme);
+
+/* ---------- вход ---------- */
+const view=v=>{$('login').classList.toggle('hide',v!=='login');$('app').classList.toggle('hide',v!=='app')};
 const say=(t,ok)=>{$('msg').className=ok?'g':'e';$('msg').textContent=t||''};
-async function init(){try{const r=await vpn.session();r.data?enter(r.data):show('login')}catch(e){show('login');say('Ошибка запуска: '+e.message)}}
-async function enter(u){show('main');setUser(u);const m=await vpn.me();if(m.ok&&m.data)setUser(m.data);else if(m.error==='AUTH')return show('login');await refreshSub();poll()}
-function setUser(u){if(!u)return;$('who').textContent=u.email||(u.username?'@'+u.username:'')||'';
-  const b=u.balance_kopeks!=null?u.balance_kopeks/100:u.balance_rubles;if(b!=null)$('bal').textContent=Number(b).toFixed(2)+' ₽'}
 function tab(r){reg=r;$('tL').classList.toggle('act',!r);$('tR').classList.toggle('act',r);$('nm').classList.toggle('hide',!r);
   $('go').textContent=r?'Зарегистрироваться':'Войти';$('fgW').classList.toggle('hide',r);$('pw').placeholder=r?'Пароль (минимум 8 символов)':'Пароль';say('')}
 $('tL').onclick=()=>tab(false);$('tR').onclick=()=>tab(true);
-$('eye').onclick=()=>{const i=$('pw');const h=i.type==='password';i.type=h?'text':'password';$('eye').textContent=h?'Скрыть':'Показать'};
+$('eye').onclick=()=>{const h=$('pw').type==='password';$('pw').type=h?'text':'password';$('eye').textContent=h?'Скрыть':'Показать'};
 $('go').onclick=async()=>{
   say('');const e=$('em').value.trim(),p=$('pw').value;
   if(!e||!p)return say('Введите почту и пароль');
@@ -82,32 +121,78 @@ $('tg').onclick=async()=>{
   const r=await vpn.tg();tgWait=false;$('tg').textContent='Войти через Telegram';
   r.ok?enter(r.data):say(r.error)};
 $('web').onclick=async()=>{say('');const r=await vpn.webLogin();r.ok?enter(r.data):say(r.error)};
-$('out').onclick=async()=>{await vpn.logout();show('login')};
-document.querySelectorAll('.seg button').forEach(b=>b.onclick=()=>{if(on)return;mode=b.dataset.m;document.querySelectorAll('.seg button').forEach(x=>x.classList.toggle('act',x===b))});
+$('out').onclick=async()=>{await vpn.logout();S.list=[];view('login')};
+
+/* ---------- навигация ---------- */
+function go(p){['pHome','pSrv','pSet'].forEach(x=>$(x).classList.toggle('hide',x!==p));
+  document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('act',b.dataset.p===p));
+  if(p==='pSrv'&&!S.list.length)loadServers(false)}
+document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>go(b.dataset.p));
+$('curSrv').onclick=()=>go('pSrv');
+
+/* ---------- аккаунт / подписка ---------- */
+async function init(){try{const r=await vpn.session();r.data?enter(r.data):view('login')}catch(e){view('login');say('Ошибка запуска: '+e.message)}}
+async function enter(u){view('app');go('pHome');setUser(u);
+  const m=await vpn.me();if(m.ok&&m.data)setUser(m.data);else if(m.error==='AUTH')return view('login');
+  await refreshSub();poll();loadServers(false)}
+function setUser(u){if(!u)return;const w=u.email||(u.username?'@'+u.username:'');$('who').textContent=w;$('acc').textContent=w;
+  const b=u.balance_kopeks!=null?u.balance_kopeks/100:u.balance_rubles;if(b!=null)$('bal').textContent=Number(b).toFixed(2)+' ₽'}
 async function refreshSub(){
-  const r=await vpn.sub();if(!r.ok){if(r.error==='AUTH')return show('login');return $('err2').textContent=r.error}
+  const r=await vpn.sub();if(!r.ok){if(r.error==='AUTH')return view('login');return $('err2').textContent=r.error}
   const s=r.data.subscription;if(!s){$('tar').textContent='нет подписки';return}
-  $('tar').textContent=s.tariff_name||(s.is_trial?'Пробный':'Подписка');
-  $('left').textContent=s.is_expired?'истекла':s.time_left_display||s.days_left+' дн.';
+  const used=(s.traffic_used_gb||0).toFixed(1),lim=s.traffic_limit_gb?s.traffic_limit_gb+' ГБ':'∞';
+  const left=s.is_expired?'истекла':s.time_left_display||s.days_left+' дн.';
+  $('tar').textContent=s.tariff_name||(s.is_trial?'Пробный':'Подписка');$('left').textContent=left;
   $('dev').textContent=s.device_limit?String(s.device_limit):'—';
-  $('tr').textContent=s.traffic_limit_gb?`${s.traffic_used_gb.toFixed(1)} / ${s.traffic_limit_gb} ГБ`:`${s.traffic_used_gb.toFixed(1)} ГБ (безлимит)`;
+  $('tr').textContent=s.traffic_limit_gb?`${used} / ${lim}`:`${used} ГБ (безлимит)`;
   $('trb').style.width=Math.min(100,s.traffic_used_percent||0)+'%';
+  $('subHead').textContent=`${used} ГБ / ${lim} · ${left}`;
 }
+
+/* ---------- серверы ---------- */
+const CC={россия:'RU',финляндия:'FI',германия:'DE',нидерланды:'NL',эстония:'EE',дания:'DK',сша:'US',франция:'FR',польша:'PL',швеция:'SE',латвия:'LV',литва:'LT',казахстан:'KZ',турция:'TR',великобритания:'GB',швейцария:'CH',сингапур:'SG',япония:'JP',австрия:'AT',чехия:'CZ',италия:'IT',испания:'ES',канада:'CA',украина:'UA',беларусь:'BY',армения:'AM',грузия:'GE',израиль:'IL',оаэ:'AE',индия:'IN',сербия:'RS',болгария:'BG',румыния:'RO',венгрия:'HU',норвегия:'NO',португалия:'PT'};
+const FLAG=/[\u{1F1E6}-\u{1F1FF}]{2}\s*/gu;
+function parse(name){let code='',label=name;const m=name.match(/[\u{1F1E6}-\u{1F1FF}]{2}/u);
+  if(m){code=[...m[0]].map(c=>String.fromCharCode(c.codePointAt(0)-0x1F1E6+65)).join('');label=name.replace(FLAG,'').trim()||name}
+  if(!code){const l=label.toLowerCase();for(const k in CC)if(l.includes(k)){code=CC[k];break}}
+  return{code,label}}
+function badge(code){let h=0;for(const c of code||'AUTO')h=(h*31+c.charCodeAt(0))%360;return `<span class="fl" style="background:hsl(${h} 50% 40%)">${esc(code||'★')}</span>`}
+async function loadServers(force){
+  $('srvErr').textContent='';if(force)$('list').innerHTML='<div class="mut" style="padding:10px">Загружаю…</div>';
+  const r=await vpn.servers({format:S.fmt,force});
+  if(!r.ok){$('list').innerHTML='';return $('srvErr').textContent=r.error}
+  S.list=r.data.list;
+  if(!S.list.find(x=>x.tag===S.server)){S.server=S.list[0]?S.list[0].tag:'';ls.set('server',S.server)}
+  renderServers();renderCur()}
+function renderServers(){
+  $('list').innerHTML=S.list.map((s,i)=>{const p=parse(s.tag),pg=S.ping[s.tag];
+    const sub=s.auto?'Автовыбор лучшего':[s.proto,s.net,s.sec].filter(Boolean).join(' / ');
+    return `<div class="srv ${s.tag===S.server?'sel':''}" data-i="${i}">${badge(p.code)}<div><div class="n">${esc(p.label)}</div><div class="s">${esc(sub)}</div></div><div class="p">${pg==null?'':pg<0?'—':pg+' мс'}</div></div>`}).join('')||'<div class="mut" style="padding:10px">Нет серверов</div>';
+  document.querySelectorAll('.srv').forEach(el=>el.onclick=()=>pick(S.list[+el.dataset.i].tag))}
+function renderCur(){const s=S.list.find(x=>x.tag===S.server);$('curName').textContent=s?parse(s.tag).label:'Авто'}
+async function pick(tag){S.server=tag;ls.set('server',tag);renderServers();renderCur();await vpn.pick(tag)}
+$('pingAll').onclick=()=>{S.list.filter(s=>!s.auto).forEach(async s=>{S.ping[s.tag]=undefined;const r=await vpn.ping(s.tag);S.ping[s.tag]=r.ok?r.data:-1;renderServers()})};
+$('reload').onclick=()=>loadServers(true);
+
+/* ---------- настройки ---------- */
+$('fmt').value=S.fmt;$('fmt').onchange=()=>{S.fmt=$('fmt').value;ls.set('fmt',S.fmt);S.list=[];loadServers(true)};
+function applyMode(m){S.mode=m;ls.set('mode',m);document.querySelectorAll('[data-m]').forEach(b=>b.classList.toggle('act',b.dataset.m===m))}
+document.querySelectorAll('[data-m]').forEach(b=>b.onclick=()=>{if(!on)applyMode(b.dataset.m)});applyMode(S.mode);
+
+/* ---------- подключение ---------- */
 $('big').onclick=async()=>{
   if(busy)return;busy=true;$('err2').textContent='';
   if(on){$('st').textContent='Отключаю…';await vpn.disconnect()}
-  else{$('st').textContent='Подключаю…';const r=await vpn.connect(mode);if(!r.ok)$('err2').textContent=r.error}
+  else{$('st').textContent='Подключаю…';const r=await vpn.connect({mode:S.mode,server:S.server,format:S.fmt});if(!r.ok)$('err2').textContent=r.error}
   busy=false;poll();
 };
 async function poll(){
   const r=await vpn.status();if(!r.ok)return;on=r.data.running;
   $('big').classList.toggle('on',on);$('big').textContent=on?'Отключить':'Подключить';
   if(!busy)$('st').textContent=on?'Подключено':'Отключено';
-  const g=r.data.groups[0];$('srv').classList.toggle('hide',!g);
-  if(g&&document.activeElement!==$('sel')){$('sel').innerHTML=g.all.map(n=>`<option ${n===g.now?'selected':''}>${n}</option>`).join('');$('sel').dataset.g=g.name}
+  if(on&&r.data.now&&r.data.now!==S.server&&S.list.find(x=>x.tag===r.data.now)){S.server=r.data.now;renderServers();renderCur()}
 }
-$('sel').onchange=()=>vpn.select($('sel').dataset.g,$('sel').value);
-const live=()=>!$('main').classList.contains('hide');
+const live=()=>!$('app').classList.contains('hide');
 setInterval(()=>{if(live())poll()},3000);
 setInterval(async()=>{if(!live())return;refreshSub();const m=await vpn.me();if(m.ok&&m.data)setUser(m.data)},60000);
 init();
