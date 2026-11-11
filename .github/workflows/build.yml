@@ -22,7 +22,7 @@ jobs:
           Copy-Item wt/wintun/bin/amd64/wintun.dll -Destination bin -Force
           Get-ChildItem bin
       - run: npm install
-      - run: npm run dist
+      - run: npx electron-builder --win --x64 --publish never
       - uses: actions/upload-artifact@v4
         with:
           name: Mikaela-VPN-win
