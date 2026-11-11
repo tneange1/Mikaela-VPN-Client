@@ -9,7 +9,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 20 }
-      - name: Download sing-box + wintun
+      - name: Download sing-box, Xray-core, wintun
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Path bin -Force | Out-Null
@@ -17,10 +17,13 @@ jobs:
           Invoke-WebRequest "https://github.com/SagerNet/sing-box/releases/download/v$v/sing-box-$v-windows-amd64.zip" -OutFile sb.zip
           Expand-Archive sb.zip -DestinationPath sb
           Copy-Item "sb/sing-box-$v-windows-amd64/*" -Destination bin -Recurse -Force
+          Invoke-WebRequest "https://github.com/XTLS/Xray-core/releases/latest/download/Xray-windows-64.zip" -OutFile xr.zip
+          Expand-Archive xr.zip -DestinationPath xr
+          Copy-Item xr/xray.exe, xr/geoip.dat, xr/geosite.dat -Destination bin -Force
           Invoke-WebRequest "https://www.wintun.net/builds/wintun-0.14.1.zip" -OutFile wt.zip
           Expand-Archive wt.zip -DestinationPath wt
           Copy-Item wt/wintun/bin/amd64/wintun.dll -Destination bin -Force
-          Get-ChildItem bin
+          Get-ChildItem bin | Select-Object Name, Length
       - run: npm install
       - run: npx electron-builder --win --x64 --publish never
       - uses: actions/upload-artifact@v4
