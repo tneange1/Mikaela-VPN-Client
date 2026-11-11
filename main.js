@@ -1,17 +1,42 @@
-const { app, BrowserWindow, ipcMain, safeStorage, shell, session: ses, net: enet } = require('electron');
+const { app, BrowserWindow, ipcMain, safeStorage, shell, session: ses, net: enet, clipboard } = require('electron');
 const path = require('path'), fs = require('fs'), net = require('net'), os = require('os'), crypto = require('crypto');
 const { spawn, execFileSync } = require('child_process');
 
 const BASE = process.env.MIKAELA_API || 'https://cabinet.mikaelavpn.xyz';
 const CABINET = 'https://cabinet.mikaelavpn.xyz/';
-const UA_XRAY = 'Happ/4.6.1/windows';
-const CLASH = 'http://127.0.0.1:9090';
+const UA = 'MikaelaVPN/1.0 (Windows)';     // свой User-Agent: на него настраивается Response Rule в панели
+const XRAY_PORT = 10870;                    // локальный socks Xray (не пересекается с Happ: 10808/10809)
 const REG = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings';
+const BAD = ['0.0.0.0', '127.0.0.1', 'localhost', '::', '::1'];
 
-let win = null, tgCancel = false, session = null, proc = null, prefix = null, lastErr = '', ph = 0;
-let cache = null, cur = null; // cache: {cfg, at}; cur: {selTag, list}
+let win = null, tgCancel = false, session = null, prefix = null;
+let xray = null, sb = null, stopping = false, restarting = false, lastFail = '', lastLevel = 'warning', curTag = '';
+let entries = null, entriesAt = 0;
+const sleep = ms => new Promise(r => setTimeout(r, ms));
 const sFile = () => path.join(app.getPath('userData'), 'session.bin');
 const binDir = () => app.isPackaged ? path.join(process.resourcesPath, 'bin') : path.join(__dirname, 'bin');
+const logDir = () => path.join(app.getPath('userData'), 'logs');
+
+// ---------- логи ----------
+const logBuf = [], pend = [];
+const mask = s => String(s).replace(/\x1b\[[0-9;]*m/g, '').replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, m => m.slice(0, 8) + '…');
+function log(tag, msg) {
+  const t = new Date(), p = (n, l = 2) => String(n).padStart(l, '0');
+  const line = `${p(t.getHours())}:${p(t.getMinutes())}:${p(t.getSeconds())}.${p(t.getMilliseconds(), 3)} [${tag}] ${mask(msg)}`;
+  logBuf.push(line); if (logBuf.length > 3000) logBuf.splice(0, logBuf.length - 3000);
+  pend.push(line);
+}
+setInterval(() => {
+  if (!pend.length) return;
+  const txt = pend.splice(0).join('\n') + '\n';
+  try {
+    fs.mkdirSync(logDir(), { recursive: true });
+    const f = path.join(logDir(), 'app.log');
+    try { if (fs.statSync(f).size > 2e6) fs.renameSync(f, path.join(logDir(), 'app.old.log')); } catch {}
+    fs.appendFileSync(f, txt);
+  } catch {}
+}, 700);
+const safeUrl = u => { try { const x = new URL(u); return x.host + x.pathname.split('/').map(s => /^(?=.*\d)[A-Za-z0-9_-]{8,}$/.test(s) ? s.slice(0, 4) + '…' : s).join('/'); } catch { return String(u); } };
 
 function save() {
   try {
@@ -27,7 +52,7 @@ function load() {
   } catch { session = null; }
 }
 
-// ---------- HWID (стабильный ID устройства для панели) ----------
+// ---------- HWID ----------
 let _hwid = null;
 function hwid() {
   if (_hwid) return _hwid;
@@ -41,21 +66,23 @@ function hwid() {
   }
   return _hwid;
 }
-const subHeaders = () => ({ 'User-Agent': UA_XRAY, 'x-hwid': hwid(), 'x-device-os': 'Windows', 'x-ver-os': os.release(), 'x-device-model': os.hostname() });
+const subHeaders = () => ({ 'User-Agent': UA, 'x-hwid': hwid(), 'x-device-os': 'Windows', 'x-ver-os': os.release(), 'x-device-model': os.hostname() });
 
 // ---------- сеть ----------
 const why = e => (e && e.cause && (e.cause.code || e.cause.message)) || (e && e.name === 'TimeoutError' ? 'таймаут' : e && e.message) || 'ошибка';
 async function nf(url, o = {}, label = 'Нет связи с сервером') {
-  // Chromium-сеть (лучше Node fetch при нескольких IP/IPv6) + повторы при сбое соединения
-  const get = (o.method || 'GET') === 'GET';
+  const get = (o.method || 'GET') === 'GET', m = o.method || 'GET', t0 = Date.now();
   let err;
   for (let i = 0; i < 3; i++) {
-    try { return await enet.fetch(url, { ...o, signal: AbortSignal.timeout(20000) }); }
-    catch (e) {
+    try {
+      const r = await enet.fetch(url, { ...o, signal: AbortSignal.timeout(20000) });
+      log('net', `${m} ${safeUrl(url)} → ${r.status} (${Date.now() - t0} мс)`);
+      return r;
+    } catch (e) {
       err = e;
-      const msg = why(e) + ' ' + (e && e.message);
-      if (!get && !/CONNECT|ERR_CONNECTION|ERR_NAME|ERR_INTERNET|ENOTFOUND/i.test(msg)) break; // POST/DELETE повторяем только если запрос точно не ушёл
-      await new Promise(r => setTimeout(r, 700 * (i + 1)));
+      log('net', `${m} ${safeUrl(url)} ✗ ${why(e)} (попытка ${i + 1}/3)`);
+      if (!get && !/CONNECT|ERR_CONNECTION|ERR_NAME|ERR_INTERNET|ENOTFOUND/i.test(why(e) + ' ' + (e && e.message))) break;
+      await sleep(700 * (i + 1));
     }
   }
   throw new Error(`${label} (${why(err)})`);
@@ -66,7 +93,7 @@ async function raw(p, o = {}) { // пробуем BASE и BASE/api
   for (const pf of ['', '/api']) {
     try {
       const r = await nf(BASE + pf + p, o);
-      if ((r.headers.get('content-type') || '').includes('json')) { prefix = pf; return r; }
+      if ((r.headers.get('content-type') || '').includes('json')) { prefix = pf; log('net', `API prefix: "${pf}"`); return r; }
       last = r;
     } catch (e) { last = e; }
   }
@@ -78,12 +105,12 @@ const J = { 'Content-Type': 'application/json' };
 async function refresh() {
   try {
     const r = await raw('/cabinet/auth/refresh', { method: 'POST', headers: J, body: JSON.stringify({ refresh_token: session.refresh }) });
-    if (!r.ok) { session = null; save(); return false; }
+    if (!r.ok) { log('auth', 'refresh отклонён: ' + r.status); session = null; save(); return false; }
     const d = await r.json();
     session.access = d.access_token;
     if (d.refresh_token) session.refresh = d.refresh_token;
-    save(); return true;
-  } catch { return false; }
+    save(); log('auth', 'токен обновлён'); return true;
+  } catch (e) { log('auth', 'refresh ошибка: ' + e.message); return false; }
 }
 async function authed(p, o = {}) {
   for (let i = 0; i < 2; i++) {
@@ -104,16 +131,16 @@ const errText = (d, def) => {
 async function jcall(p, method = 'GET', body) {
   const r = await authed(p, { method, headers: body ? J : undefined, body: body ? JSON.stringify(body) : undefined });
   const d = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(errText(d, 'Ошибка ' + r.status));
+  if (!r.ok) { log('api', `${method} ${p} → ${r.status}: ${errText(d, '')}`); throw new Error(errText(d, 'Ошибка ' + r.status)); }
   return d;
 }
 
 // ---------- аккаунт ----------
-function setAuth(d) { session = { access: d.access_token, refresh: d.refresh_token, user: d.user }; save(); return d.user; }
+function setAuth(d) { session = { access: d.access_token, refresh: d.refresh_token, user: d.user }; save(); log('auth', 'вход выполнен'); return d.user; }
 async function login(email, password) {
   const r = await raw('/cabinet/auth/email/login', { method: 'POST', headers: J, body: JSON.stringify({ email, password }) });
   const d = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(errText(d, 'Неверная почта или пароль. Если вход был через Telegram/Google — пароль не задан: нажми «Забыли пароль?»'));
+  if (!r.ok) { log('auth', 'вход по email: отказ ' + r.status); throw new Error(errText(d, 'Неверная почта или пароль. Если вход был через Telegram/Google — пароль не задан: нажми «Забыли пароль?»')); }
   return setAuth(d);
 }
 async function register(email, password, name) {
@@ -136,7 +163,7 @@ async function tgLogin() {
   shell.openExternal(`https://t.me/${d.bot_username}?start=webauth_${d.token}`);
   const until = Date.now() + (d.expires_in || 300) * 1000;
   while (Date.now() < until && !tgCancel) {
-    await new Promise(x => setTimeout(x, 2000));
+    await sleep(2000);
     const p = await raw('/cabinet/auth/deeplink/poll', { method: 'POST', headers: J, body: JSON.stringify({ token: d.token }) });
     if (p.status === 200) return setAuth(await p.json());
     if (p.status === 410) break;
@@ -202,141 +229,223 @@ async function topup(o) {
 const renewOptions = () => jcall('/cabinet/subscription/renewal-options');
 const renew = days => jcall('/cabinet/subscription/renew', 'POST', { period_days: days });
 
-// ---------- подписка: Xray JSON -> sing-box ----------
-const BAD = ['0.0.0.0', '127.0.0.1', 'localhost', '::', '::1'];
-function convOut(o) {
-  const s = o.settings || {}, ss = o.streamSettings || {};
-  let b;
-  if (o.protocol === 'vless' || o.protocol === 'vmess') {
-    const v = (s.vnext && s.vnext[0]) || s, u = (v.users && v.users[0]) || v;
-    b = { type: o.protocol, server: v.address, server_port: +v.port, uuid: u.id };
-    if (o.protocol === 'vless') { if (u.flow) b.flow = u.flow; }
-    else { b.security = u.security || 'auto'; b.alter_id = +u.alterId || 0; }
-  } else if (o.protocol === 'trojan') {
-    const v = (s.servers && s.servers[0]) || s;
-    b = { type: 'trojan', server: v.address, server_port: +v.port, password: v.password };
-  } else {
-    const v = (s.servers && s.servers[0]) || s;
-    b = { type: 'shadowsocks', server: v.address, server_port: +v.port, method: v.method, password: v.password };
+// ---------- подписка: Xray JSON (как в Happ) ----------
+const isProxy = o => o && o.protocol && !['freedom', 'blackhole', 'dns', 'loopback'].includes(o.protocol);
+const hostOf = o => { const s = o.settings || {}, v = (s.vnext && s.vnext[0]) || (s.servers && s.servers[0]) || s; return v && v.address ? { host: String(v.address), port: +v.port || 443 } : null; };
+let ph = 0;
+function buildEntries(arr) {
+  const seen = new Set(), out = []; ph = 0;
+  for (const cfg of arr) {
+    const outs = (cfg.outbounds || []).filter(isProxy);
+    if (!outs.length) continue;
+    const bal = cfg.routing && cfg.routing.balancers && cfg.routing.balancers[0];
+    let subj = outs;                                     // узлы балансировщика: теги с префиксом из selector
+    if (bal && Array.isArray(bal.selector)) { const m = outs.filter(o => bal.selector.some(p => String(o.tag || '').startsWith(p))); if (m.length) subj = m; }
+    const hosts = subj.map(hostOf).filter(Boolean);
+    if (!hosts.length || hosts.every(h => BAD.includes(h.host))) { ph++; continue; }
+    const name = cfg.remarks || cfg.ps || 'server';
+    let t = name, i = 2; while (seen.has(t)) t = `${name} ${i++}`; seen.add(t);
+    const ss = subj[0].streamSettings || {};
+    out.push({ tag: t, cfg, auto: !!bal && subj.length > 1, count: subj.length, hosts: hosts.filter(h => !BAD.includes(h.host)),
+      proto: String(subj[0].protocol || '').toUpperCase(), net: String(ss.network || 'tcp').toUpperCase(), sec: ss.security && ss.security !== 'none' ? String(ss.security).toUpperCase() : '' });
   }
-  if (!b.server || !b.server_port) return null;
-  if (BAD.includes(String(b.server))) { ph++; return null; } // заглушка панели («приложение не поддерживается»)
-  const nw = ss.network || 'tcp', sec = ss.security || 'none';
-  if (sec === 'reality') {
-    const r = ss.realitySettings || {};
-    b.tls = { enabled: true, server_name: r.serverName, utls: { enabled: true, fingerprint: r.fingerprint || 'chrome' }, reality: { enabled: true, public_key: r.publicKey, short_id: r.shortId || '' } };
-  } else if (sec === 'tls') {
-    const t = ss.tlsSettings || {};
-    b.tls = { enabled: true, server_name: t.serverName || b.server, insecure: !!t.allowInsecure };
-    if (t.alpn) b.tls.alpn = t.alpn;
-    if (t.fingerprint) b.tls.utls = { enabled: true, fingerprint: t.fingerprint };
-  }
-  if (nw === 'ws') { const w = ss.wsSettings || {}; b.transport = { type: 'ws', path: w.path || '/', headers: w.headers || (w.host ? { Host: w.host } : undefined) }; }
-  else if (nw === 'grpc') b.transport = { type: 'grpc', service_name: (ss.grpcSettings || {}).serviceName || '' };
-  else if (nw === 'httpupgrade') { const w = ss.httpupgradeSettings || {}; b.transport = { type: 'httpupgrade', path: w.path || '/', host: w.host }; }
-  else if (nw !== 'tcp') return null; // xhttp и пр. sing-box не умеет
-  return b;
+  return out;
 }
-function fromXray(arr) {
-  const outs = [], names = [], seen = new Set(['proxy', 'direct', 'block']);
-  const uniq = n => { let x = n, i = 2; while (seen.has(x)) x = `${n} ${i++}`; seen.add(x); return x; };
-  for (const e of arr) {
-    const name = e.remarks || e.ps || 'server';
-    const conv = (e.outbounds || []).filter(o => ['vless', 'vmess', 'trojan', 'shadowsocks'].includes(o.protocol)).map(convOut).filter(Boolean);
-    if (!conv.length) continue;
-    if (conv.length === 1) { conv[0].tag = uniq(name); outs.push(conv[0]); names.push(conv[0].tag); }
-    else {
-      const members = conv.map((c, i) => { c.tag = uniq(`${name} · ${i + 1}`); outs.push(c); return c.tag; });
-      const t = uniq(name);
-      outs.push({ type: 'urltest', tag: t, outbounds: members, url: 'https://www.gstatic.com/generate_204', interval: '5m' });
-      names.push(t);
-    }
-  }
-  if (!outs.length) return null;
-  return {
-    log: { level: 'warn' },
-    dns: { servers: [{ type: 'tls', tag: 'dns-remote', server: '1.1.1.1', detour: 'proxy' }, { type: 'udp', tag: 'dns-local', server: '8.8.8.8' }], final: 'dns-remote' },
-    outbounds: [...outs, { type: 'selector', tag: 'proxy', outbounds: names, default: names[0] }, { type: 'direct', tag: 'direct' }],
-    route: { rules: [{ action: 'sniff' }, { protocol: 'dns', action: 'hijack-dns' }, { ip_is_private: true, outbound: 'direct' }], final: 'proxy', auto_detect_interface: true, default_domain_resolver: 'dns-local' },
-  };
-}
-async function loadConfig() {
+async function fetchEntries() {
   const s = await getSub();
   const url = s.subscription && s.subscription.subscription_url;
   if (!url) throw new Error('Нет активной подписки. Оформи её в боте или кабинете.');
+  log('sub', `подписка: ${safeUrl(url)} (UA ${UA}, HWID ${hwid().slice(0, 8)}…)`);
   const base = new URL(url).pathname.replace(/\/+$/, '');
   const withPath = sfx => { const x = new URL(url); x.pathname = base + sfx; return x.toString(); };
-  let lastE = ''; ph = 0;
-  for (const u of [withPath('/json'), url]) {
+  let lastE = '';
+  for (const [u, label] of [[url, 'базовая ссылка'], [withPath('/json'), 'ссылка /json']]) {
     try {
       const r = await nf(u, { headers: subHeaders() }, 'Подписка недоступна');
-      let j; try { j = JSON.parse(await r.text()); } catch { lastE = 'ответ не JSON'; continue; }
-      const cfg = Array.isArray(j) ? fromXray(j) : (j && Array.isArray(j.outbounds) ? fromXray([j]) : null);
-      if (cfg) return { cfg, sub: s };
-      lastE = ph ? 'панель вернула заглушку — вероятно, достигнут лимит устройств (удалите лишнее на вкладке «Устройства»)' : 'неизвестный формат ответа';
-    } catch (e) { lastE = e.message; }
+      const text = await r.text();
+      log('sub', `${label}: HTTP ${r.status}, ${text.length} байт, тип ${r.headers.get('content-type')}`);
+      let j; try { j = JSON.parse(text); } catch {
+        lastE = `ответ не JSON (HTTP ${r.status})${text ? ': ' + text.slice(0, 80).replace(/\s+/g, ' ') : ''}`;
+        if (r.status === 403 || r.status === 404) lastE += ' — панель не отдаёт подписку для User-Agent ' + UA.split('/')[0] + ': добавьте Response Rule';
+        log('sub', lastE); continue;
+      }
+      const arr = Array.isArray(j) ? j : (j && Array.isArray(j.outbounds) ? [j] : null);
+      if (!arr || !arr.length) { lastE = 'JSON без конфигов'; log('sub', lastE); continue; }
+      const ents = buildEntries(arr);
+      if (ents.length) { log('sub', `серверов: ${ents.length}: ` + ents.map(e => e.tag + (e.auto ? ` [авто, ${e.count} узлов]` : '')).join('; ')); return ents; }
+      lastE = ph ? 'панель вернула заглушку — вероятно, достигнут лимит устройств (удалите лишнее на вкладке «Устройства»)' : 'в ответе нет подходящих серверов';
+      log('sub', lastE);
+    } catch (e) { lastE = e.message; log('sub', 'ошибка: ' + e.message); }
   }
   throw new Error('Не удалось получить подписку: ' + lastE);
 }
-function serverList(cfg) {
-  const outs = cfg.outbounds || [], by = Object.fromEntries(outs.map(o => [o.tag, o]));
-  const skip = ['direct', 'block', 'dns'];
-  const sel = outs.find(o => o.type === 'selector');
-  const tags = sel ? sel.outbounds : outs.filter(o => !['selector', 'urltest', ...skip].includes(o.type)).map(o => o.tag);
-  return {
-    selTag: sel && sel.tag,
-    list: tags.filter(t => by[t] && !skip.includes(by[t].type)).map(t => {
-      const o = by[t], g = ['urltest', 'selector'].includes(o.type);
-      return { tag: t, auto: g, proto: g ? 'АВТО' : (o.type || '').toUpperCase(), net: g ? '' : ((o.transport && o.transport.type) || 'tcp').toUpperCase(), sec: o.tls && o.tls.reality && o.tls.reality.enabled ? 'REALITY' : (o.tls && o.tls.enabled ? 'TLS' : '') };
-    }),
-  };
+async function loadEntries(force) {
+  if (!force && entries && Date.now() - entriesAt < 3600000) return entries;
+  entries = await fetchEntries(); entriesAt = Date.now();
+  return entries;
 }
-async function servers(o) {
-  if (!(o && o.force) && cache && Date.now() - cache.at < 3600000) return cur;
-  const { cfg } = await loadConfig();
-  cache = { cfg, at: Date.now() }; cur = serverList(cfg);
-  return { ...cur, at: cache.at };
-}
-const ping = tag => new Promise(res => {
-  const o = cache && (cache.cfg.outbounds || []).find(x => x.tag === tag);
-  if (!o || !o.server) return res(-1);
-  const t = Date.now();
-  const s = net.connect({ host: o.server, port: o.server_port, timeout: 3000 }, () => { const d = Date.now() - t; s.destroy(); res(d); });
-  s.on('error', () => res(-1));
-  s.on('timeout', () => { s.destroy(); res(-1); });
+const servers = async o => {
+  const ents = await loadEntries(o && o.force);
+  return { list: ents.map(e => ({ tag: e.tag, auto: e.auto, count: e.count, proto: e.proto, net: e.net, sec: e.sec })), at: entriesAt };
+};
+const tcpPing = h => new Promise(res => {
+  const t = Date.now(), s = net.connect({ host: h.host, port: h.port, timeout: 3000 }, () => { const d = Date.now() - t; s.destroy(); res(d); });
+  s.on('error', () => res(-1)); s.on('timeout', () => { s.destroy(); res(-1); });
 });
+async function ping(tag) {
+  const e = (entries || []).find(x => x.tag === tag);
+  if (!e) return -1;
+  const r = (await Promise.all(e.hosts.map(tcpPing))).filter(x => x >= 0);
+  log('ping', `${tag}: ${r.length ? Math.min(...r) + ' мс' : 'нет ответа'} (${r.length}/${e.hosts.length} узлов)`);
+  return r.length ? Math.min(...r) : -1;
+}
 
-// ---------- подключение (только TUN) ----------
+// ---------- процессы: Xray (ядро) + sing-box (TUN) ----------
 const proxyOffSync = () => { try { execFileSync('reg', ['add', REG, '/v', 'ProxyEnable', '/t', 'REG_DWORD', '/d', '0', '/f'], { windowsHide: true }); } catch {} };
-async function disconnect() { const p = proc; proc = null; if (p) { p.removeAllListeners('exit'); p.kill(); } }
-
-async function connect(o = {}) {
-  await disconnect();
-  const { cfg } = await loadConfig();
-  cache = { cfg, at: Date.now() }; cur = serverList(cfg);
-  if (o.server && cur.selTag) {
-    const sel = cfg.outbounds.find(x => x.tag === cur.selTag);
-    if (sel && sel.outbounds.includes(o.server)) sel.default = o.server;
+const pidFile = () => path.join(app.getPath('userData'), 'pids.json');
+const savePids = () => { try { fs.writeFileSync(pidFile(), JSON.stringify([xray && xray.pid, sb && sb.pid].filter(Boolean))); } catch {} };
+function killOrphans() { // процессы прошлого запуска, если приложение упало
+  try {
+    for (const pid of JSON.parse(fs.readFileSync(pidFile(), 'utf8'))) {
+      try {
+        const out = execFileSync('tasklist', ['/FI', `PID eq ${pid}`, '/FO', 'CSV', '/NH'], { windowsHide: true }).toString();
+        if (/xray\.exe|sing-box\.exe/i.test(out)) { execFileSync('taskkill', ['/PID', String(pid), '/F'], { windowsHide: true }); log('app', `остановлен старый процесс ${pid}`); }
+      } catch {}
+    }
+    fs.rmSync(pidFile(), { force: true });
+  } catch {}
+}
+const portOpen = (port, ms) => new Promise(res => {
+  const s = net.connect({ host: '127.0.0.1', port, timeout: ms }, () => { s.destroy(); res(true); });
+  s.on('error', () => res(false)); s.on('timeout', () => { s.destroy(); res(false); });
+});
+function checkBins() {
+  const miss = [];
+  for (const f of ['xray.exe', 'sing-box.exe', 'wintun.dll', 'geoip.dat', 'geosite.dat']) {
+    try { log('bin', `${f}: ${Math.round(fs.statSync(path.join(binDir(), f)).size / 1024)} КБ`); } catch { miss.push(f); log('bin', `${f}: ОТСУТСТВУЕТ в ${binDir()}`); }
   }
-  cfg.log = { level: 'warn', timestamp: true };
-  cfg.inbounds = [{ type: 'tun', tag: 'tun-in', address: ['172.19.0.1/30'], auto_route: true, strict_route: true, stack: 'mixed' }];
-  cfg.experimental = { clash_api: { external_controller: '127.0.0.1:9090' } };
-  const cfgPath = path.join(app.getPath('userData'), 'config.json');
-  fs.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2));
-
-  lastErr = '';
-  proc = spawn(path.join(binDir(), 'sing-box.exe'), ['run', '-c', cfgPath, '-D', binDir()], { windowsHide: true });
-  proc.on('error', e => { lastErr = 'не удалось запустить sing-box.exe: ' + e.message; proc = null; });
-  proc.stderr.on('data', d => { lastErr = (lastErr + d).slice(-1200); });
-  proc.stdout.on('data', d => { lastErr = (lastErr + d).slice(-1200); });
-  proc.on('exit', () => { proc = null; });
+  if (miss.length) throw new Error('В приложении нет файлов: ' + miss.join(', ') + '. Пересоберите приложение (workflow их скачивает).');
+}
+function run(name, exe, args, env) {
+  const p = spawn(path.join(binDir(), exe), args, { windowsHide: true, cwd: binDir(), env: { ...process.env, ...env } });
+  log(name, `запуск: ${exe} ${args.map(a => path.basename(a)).join(' ')} (pid ${p.pid})`);
+  let tail = '';
+  const feed = d => String(d).split(/\r?\n/).filter(Boolean).forEach(l => { log(name, l); tail = (tail + '\n' + l).slice(-1500); });
+  p.stdout.on('data', feed); p.stderr.on('data', feed);
+  p.on('error', e => { p.failed = e.message; log(name, 'не запустился: ' + e.message); });
+  p.tail = () => tail.trim();
+  return p;
+}
+function xrayConfig(entry, level) {
+  const c = JSON.parse(JSON.stringify(entry.cfg));
+  delete c.meta; delete c.remarks; delete c.remnawave;
+  const old = (c.inbounds || []).find(i => i.protocol === 'socks');
+  c.inbounds = [{ tag: 'socks', listen: '127.0.0.1', port: XRAY_PORT, protocol: 'socks', settings: { auth: 'noauth', udp: true, ip: '127.0.0.1' },
+    sniffing: (old && old.sniffing) || { enabled: true, destOverride: ['http', 'tls', 'quic'], routeOnly: false } }];
+  c.log = { loglevel: level };
+  return c;
+}
+async function startXray(entry, level) {
+  const f = path.join(app.getPath('userData'), 'xray-config.json');
+  fs.writeFileSync(f, JSON.stringify(xrayConfig(entry, level), null, 2));
+  log('xray', `сервер «${entry.tag}»${entry.auto ? ` (автовыбор, ${entry.count} узлов)` : ''}`);
+  const p = run('xray', 'xray.exe', ['run', '-c', f], { XRAY_LOCATION_ASSET: binDir() });
+  xray = p; savePids();
+  p.on('exit', (code, sig) => {
+    log('xray', `завершился code=${code} signal=${sig}`);
+    if (xray === p) { xray = null; if (!stopping && !restarting) { lastFail = 'Xray неожиданно остановился: ' + p.tail(); stopAll('xray упал'); } }
+  });
   for (let i = 0; i < 40; i++) {
-    await new Promise(r => setTimeout(r, 300));
-    if (!proc) throw new Error('sing-box остановился: ' + lastErr.trim());
-    try { await fetch(CLASH + '/version', { signal: AbortSignal.timeout(1000) }); return true; } catch {}
+    await sleep(300);
+    if (xray !== p) throw new Error('Xray остановился: ' + (p.failed || p.tail() || 'нет вывода'));
+    if (await portOpen(XRAY_PORT, 400)) { log('xray', `socks-порт ${XRAY_PORT} готов (${(i + 1) * 300} мс)`); return; }
   }
-  await disconnect();
-  throw new Error('sing-box не запустился: ' + lastErr.trim());
+  throw new Error('Xray не открыл порт ' + XRAY_PORT + ': ' + p.tail());
+}
+async function startSingbox(level) {
+  const cfg = {
+    log: { level: level === 'debug' ? 'debug' : level === 'info' ? 'info' : 'warn', timestamp: false },
+    dns: { servers: [{ type: 'tcp', tag: 'dns-remote', server: '1.1.1.1', detour: 'xray' }], final: 'dns-remote', strategy: 'ipv4_only' },
+    inbounds: [{ type: 'tun', tag: 'tun-in', address: ['172.19.0.1/30'], auto_route: true, strict_route: true, stack: 'mixed' }],
+    outbounds: [{ type: 'socks', tag: 'xray', server: '127.0.0.1', server_port: XRAY_PORT, version: '5' }, { type: 'direct', tag: 'direct' }],
+    route: {
+      rules: [
+        { action: 'sniff' },
+        { process_name: ['xray.exe'], outbound: 'direct' },   // трафик самого Xray к серверам — мимо TUN
+        { protocol: 'dns', action: 'hijack-dns' },
+        { ip_is_private: true, outbound: 'direct' },
+      ],
+      final: 'xray', auto_detect_interface: true, find_process: true,
+    },
+  };
+  const f = path.join(app.getPath('userData'), 'singbox-config.json');
+  fs.writeFileSync(f, JSON.stringify(cfg, null, 2));
+  const p = run('sing-box', 'sing-box.exe', ['run', '-c', f, '-D', binDir()]);
+  sb = p; savePids();
+  p.on('exit', (code, sig) => {
+    log('sing-box', `завершился code=${code} signal=${sig}`);
+    if (sb === p) { sb = null; if (!stopping) { lastFail = 'sing-box (TUN) остановился: ' + p.tail(); stopAll('sing-box упал'); } }
+  });
+  for (let i = 0; i < 8; i++) {
+    await sleep(400);
+    if (sb !== p) throw new Error('sing-box остановился: ' + (p.failed || p.tail() || 'нет вывода'));
+  }
+  log('sing-box', 'TUN запущен');
+}
+async function stopAll(reason) {
+  stopping = true;
+  for (const p of [sb, xray]) { if (p) { try { p.removeAllListeners('exit'); p.kill(); } catch {} } }
+  const had = !!(sb || xray);
+  sb = null; xray = null; savePids();
+  if (had) log('app', 'остановлено' + (reason ? ': ' + reason : ''));
+  await sleep(150); stopping = false;
+}
+const probe = async (url, ms = 10000) => { const t = Date.now(); const r = await enet.fetch(url, { signal: AbortSignal.timeout(ms) }); return { r, ms: Date.now() - t }; };
+async function afterConnectTest() {
+  await sleep(1500);
+  for (const [name, url] of [['gstatic 204', 'http://www.gstatic.com/generate_204'], ['внешний IP', 'https://api.ipify.org']]) {
+    try { const { r, ms } = await probe(url); log('test', `${name}: HTTP ${r.status}, ${ms} мс${name === 'внешний IP' ? ' → ' + (await r.text()).slice(0, 40) : ''}`); }
+    catch (e) { log('test', `${name}: ОШИБКА ${why(e)} — трафик через туннель не проходит`); }
+  }
+}
+async function connect(o = {}) {
+  await stopAll('перед подключением'); lastFail = '';
+  lastLevel = ['info', 'debug'].includes(o.logLevel) ? o.logLevel : 'warning';
+  log('app', `=== подключение: сервер «${o.server || '—'}», логи: ${lastLevel} ===`);
+  try {
+    checkBins();
+    const ents = await loadEntries(true);
+    const entry = ents.find(e => e.tag === o.server) || ents[0];
+    curTag = entry.tag;
+    await startXray(entry, lastLevel);
+    await startSingbox(lastLevel);
+    log('app', 'подключено'); afterConnectTest().catch(() => {});
+    return true;
+  } catch (e) { log('app', 'ОШИБКА подключения: ' + e.message); await stopAll('ошибка'); throw e; }
+}
+async function pick(tag) {
+  curTag = tag;
+  if (!(xray && sb)) return true;
+  const e = (entries || []).find(x => x.tag === tag);
+  if (!e) return false;
+  log('app', `переключение на «${tag}»`);
+  restarting = true;
+  try { if (xray) { xray.removeAllListeners('exit'); xray.kill(); xray = null; } await sleep(300); await startXray(e, lastLevel); }
+  catch (err) { await stopAll('ошибка переключения'); throw err; }
+  finally { restarting = false; }
+  return true;
+}
+async function diag() {
+  log('diag', `=== диагностика: ${app.getName()} ${app.getVersion()}, Windows ${os.release()}, HWID ${hwid().slice(0, 8)}… ===`);
+  try { checkBins(); } catch (e) { log('diag', e.message); }
+  log('diag', `socks-порт ${XRAY_PORT}: ${(await portOpen(XRAY_PORT, 500)) ? 'открыт' : 'закрыт'}; xray ${xray ? 'работает' : 'нет'}, sing-box ${sb ? 'работает' : 'нет'}`);
+  for (const [n, u] of [['кабинет', BASE], ['gstatic 204', 'http://www.gstatic.com/generate_204'], ['внешний IP', 'https://api.ipify.org']]) {
+    try { const { r, ms } = await probe(u, 8000); log('diag', `${n}: HTTP ${r.status}, ${ms} мс${n === 'внешний IP' ? ' → ' + (await r.text()).slice(0, 40) : ''}`); }
+    catch (e) { log('diag', `${n}: ОШИБКА ${why(e)}`); }
+  }
+  for (const h of ['1.1.1.1', ...((entries && entries[0] && entries[0].hosts.slice(0, 2).map(x => x.host)) || [])]) log('diag', `TCP ${h}:443 → ${await tcpPing({ host: h, port: 443 })} мс`);
+  log('diag', '=== конец ===');
+  return true;
 }
 
 const h = (c, f) => ipcMain.handle(c, async (_, ...a) => {
@@ -345,23 +454,14 @@ const h = (c, f) => ipcMain.handle(c, async (_, ...a) => {
 });
 h('session', () => session ? session.user : null);
 h('login', login);
-h('logout', async () => { await disconnect(); try { await authed('/cabinet/auth/logout', { method: 'POST', headers: J, body: JSON.stringify({ refresh_token: session.refresh }) }); } catch {} session = null; cache = null; cur = null; save(); });
+h('logout', async () => { await stopAll('выход'); try { await authed('/cabinet/auth/logout', { method: 'POST', headers: J, body: JSON.stringify({ refresh_token: session.refresh }) }); } catch {} session = null; entries = null; save(); });
 h('sub', getSub);
 h('connect', connect);
-h('disconnect', disconnect);
-h('status', async () => {
-  let now = '';
-  if (proc && cur && cur.selTag) {
-    try { const r = await fetch(`${CLASH}/proxies/${encodeURIComponent(cur.selTag)}`, { signal: AbortSignal.timeout(2000) }); now = (await r.json()).now || ''; } catch {}
-  }
-  return { running: !!proc, now };
-});
+h('disconnect', () => stopAll('по кнопке'));
+h('status', async () => { const e = lastFail; lastFail = ''; return { running: !!(xray && sb), error: e }; });
 h('servers', servers);
 h('ping', ping);
-h('pick', async tag => {
-  if (proc && cur && cur.selTag) await fetch(`${CLASH}/proxies/${encodeURIComponent(cur.selTag)}`, { method: 'PUT', body: JSON.stringify({ name: tag }) });
-  return true;
-});
+h('pick', pick);
 h('devices', devices);
 h('deldevice', delDevice);
 h('resetdevices', resetDevices);
@@ -377,16 +477,21 @@ h('tgcancel', async () => { tgCancel = true; });
 h('weblogin', webLogin);
 h('me', me);
 h('cabinet', () => shell.openExternal(CABINET));
+h('logs', async () => logBuf.slice(-700).join('\n'));
+h('copylogs', async () => { clipboard.writeText(logBuf.join('\n')); return true; });
+h('clearlogs', async () => { logBuf.length = 0; pend.length = 0; try { fs.rmSync(logDir(), { recursive: true, force: true }); } catch {} return true; });
+h('openlogs', async () => { fs.mkdirSync(logDir(), { recursive: true }); return shell.openPath(logDir()); });
+h('diag', diag);
 
 if (!app.requestSingleInstanceLock()) app.quit();
 app.whenReady().then(() => {
-  load();
-  proxyOffSync(); // сбросить «залипший» системный прокси после прошлых версий
+  load(); proxyOffSync(); killOrphans();
+  log('app', `запуск ${app.getName()} ${app.getVersion()}, Windows ${os.release()}, bin: ${binDir()}`);
   win = new BrowserWindow({
     width: 440, height: 800, resizable: false, autoHideMenuBar: true, backgroundColor: '#0b0f1a',
     title: 'Mikaela VPN', webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true },
   });
   win.loadFile('index.html');
 });
-app.on('before-quit', () => { if (proc) proc.kill(); });
+app.on('before-quit', () => { for (const p of [sb, xray]) { try { if (p) p.kill(); } catch {} } });
 app.on('window-all-closed', () => app.quit());
