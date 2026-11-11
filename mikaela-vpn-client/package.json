@@ -1,0 +1,20 @@
+{
+  "name": "mikaela-vpn",
+  "productName": "Mikaela VPN",
+  "version": "1.0.0",
+  "description": "Mikaela VPN client (sing-box)",
+  "main": "main.js",
+  "scripts": { "start": "electron .", "dist": "electron-builder --win --x64" },
+  "devDependencies": { "electron": "^33.2.0", "electron-builder": "^25.1.8" },
+  "build": {
+    "appId": "xyz.mikaelavpn.client",
+    "productName": "Mikaela VPN",
+    "files": ["main.js", "preload.js", "index.html"],
+    "extraResources": [{ "from": "bin", "to": "bin" }],
+    "win": {
+      "target": ["nsis", "portable"],
+      "requestedExecutionLevel": "requireAdministrator"
+    },
+    "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true }
+  }
+}
