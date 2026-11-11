@@ -1,5 +1,5 @@
 <!doctype html><html lang="ru" data-theme="dark"><head><meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'unsafe-inline'; script-src 'self' 'unsafe-inline'; img-src 'self' data:">
 <title>Mikaela VPN</title>
 <style>
 :root,[data-theme=dark]{--bg:#0b0f1a;--card:#141a2b;--tx:#e8ecf8;--mut:#8b94b0;--ac:#7c5cff;--ok:#29d391;--err:#ff6b6b;--in:#0e1424;--bd:#232b45;--bt:#1b2340;--onbg:#12382c}
@@ -23,7 +23,7 @@ a{color:var(--ac);cursor:pointer;font-size:13px}
 #big{width:164px;height:164px;border-radius:50%;margin:22px auto 10px;display:flex;align-items:center;justify-content:center;background:var(--bt);color:var(--mut);border:3px solid var(--bd);transition:.25s}
 #big svg{width:58px;height:58px}#big.on{background:var(--onbg);border-color:var(--ok);color:var(--ok);box-shadow:0 0 40px #29d39144}
 .bar{height:6px;background:var(--in);border-radius:4px;margin-top:10px;overflow:hidden}.bar i{display:block;height:100%;background:var(--ac)}
-.fl{display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:50%;color:#fff;font-size:12px;font-weight:700;flex:none}
+.fl{object-fit:cover;display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:50%;color:#fff;font-size:12px;font-weight:700;flex:none}
 .srv{display:flex;gap:12px;align-items:center;padding:10px 6px;border-bottom:1px solid var(--bd)}.srv:last-child{border:0}
 .srv.sel{background:var(--bt);border-radius:10px}.srv.clk{cursor:pointer}
 .srv .n{font-weight:600}.srv .s{font-size:11px;color:var(--mut)}.srv .p{margin-left:auto;font-size:12px;color:var(--mut)}
@@ -84,6 +84,7 @@ svg{fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-lin
     <h1>Устройства</h1>
     <div class="card"><div class="row"><span class="mut">Подключено</span><b id="devHead">—</b></div></div>
     <div class="card" id="devList" style="padding:8px 12px"></div>
+    <button class="ghost" id="devReset">Сбросить все устройства</button>
     <div id="devErr" class="e" style="font-size:13px;margin-top:10px"></div>
   </section>
 
@@ -103,6 +104,7 @@ svg{fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-lin
   <div id="sheet" class="hide"><div class="sheet"><div id="sheetBody"></div><button class="ghost" id="sheetClose">Закрыть</button></div></div>
 </div>
 
+<script src="flags.js"></script>
 <script>
 const $=id=>document.getElementById(id);
 const ls={get:(k,d)=>{try{return localStorage.getItem(k)||d}catch{return d}},set:(k,v)=>{try{localStorage.setItem(k,v)}catch{}}};
@@ -182,7 +184,7 @@ const CC={россия:'RU',финляндия:'FI',германия:'DE',нид
 function parse(name){let code='',label=name;const m=name.match(/[\u{1F1E6}-\u{1F1FF}]{2}/u);
   if(m){code=[...m[0]].map(c=>String.fromCharCode(c.codePointAt(0)-0x1F1E6+65)).join('');label=name.replace(/[\u{1F1E6}-\u{1F1FF}]{2}\s*/gu,'').trim()||name}
   if(!code){const l=label.toLowerCase();for(const k in CC)if(l.includes(k)){code=CC[k];break}}return{code,label}}
-function badge(code){let h=0;for(const c of code||'AUTO')h=(h*31+c.charCodeAt(0))%360;return `<span class="fl" style="background:hsl(${h} 50% 40%)">${esc(code||'★')}</span>`}
+function badge(code){const f=window.FLAGS&&code&&window.FLAGS[code.toLowerCase()];if(f)return `<img class="fl" src="${f}" alt="${esc(code)}">`;let h=0;for(const c of code||'AUTO')h=(h*31+c.charCodeAt(0))%360;return `<span class="fl" style="background:hsl(${h} 50% 40%)">${esc(code||'★')}</span>`}
 async function loadServers(force){
   $('srvErr').textContent='';if(force)$('list').innerHTML='<div class="mut" style="padding:10px">Загружаю…</div>';
   const r=await vpn.servers({force});
@@ -209,6 +211,8 @@ function renderDevices(){const d=S.dev;if(!d)return;$('devHead').textContent=`${
     if(!confirm(b.dataset.s==='1'?'Это текущее устройство. Удалить его из аккаунта? При следующем обновлении подписки оно привяжется заново.':'Удалить это устройство из бота и панели?'))return;
     const r=await vpn.delDevice(b.dataset.h);if(!r.ok)return $('devErr').textContent=r.error;loadDevices()})}
 
+$('devReset').onclick=async()=>{if(!confirm('Удалить ВСЕ устройства из аккаунта? Текущее устройство привяжется заново при следующем обновлении.'))return;const r=await vpn.resetDevices();if(!r.ok)return $('devErr').textContent=r.error;loadDevices()};
+
 /* ---------- баланс: пополнение ---------- */
 $('balBtn').onclick=openTopup;
 async function openTopup(){
@@ -232,7 +236,7 @@ async function openTopup(){
     $('pay').onclick=async()=>{const v=parseFloat(($('amt').value||'').replace(',','.')),pm=(t,ok)=>{$('pm').className=ok?'g':'e';$('pm').textContent=t};
       if(!(v>=min))return pm('Минимальная сумма — '+min+' ₽');
       const x=await vpn.topup({amount_kopeks:Math.round(v*100),payment_method:m.id,payment_option:opt||undefined});
-      if(!x.ok)return pm(x.error);pm('Страница оплаты открыта в браузере. Баланс обновится автоматически.',true);watchBalance()}};
+      if(!x.ok)return pm(/Failed to create/i.test(x.error)?x.error+'. Платёжная система не приняла сумму — попробуйте сумму побольше (от 100 ₽) или другой способ оплаты.':x.error);pm('Страница оплаты открыта в браузере. Баланс обновится автоматически.',true);watchBalance()}};
   draw()}
 function watchBalance(){const start=S.user&&S.user.balance_kopeks;let n=0;if(watch)clearInterval(watch);
   watch=setInterval(async()=>{const m=await vpn.me();if(m.ok&&m.data){setUser(m.data);if(m.data.balance_kopeks!==start){clearInterval(watch);watch=null;closeSheet();refreshSub()}}if(++n>36){clearInterval(watch);watch=null}},5000)}
