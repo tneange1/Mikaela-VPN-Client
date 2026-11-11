@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, safeStorage, shell, session: ses } = require('electron');
+const { app, BrowserWindow, ipcMain, safeStorage, shell, session: ses, net: enet } = require('electron');
 const path = require('path'), fs = require('fs'), net = require('net'), os = require('os'), crypto = require('crypto');
 const { spawn, execFileSync } = require('child_process');
 
@@ -46,20 +46,31 @@ const subHeaders = () => ({ 'User-Agent': UA_XRAY, 'x-hwid': hwid(), 'x-device-o
 // ---------- сеть ----------
 const why = e => (e && e.cause && (e.cause.code || e.cause.message)) || (e && e.name === 'TimeoutError' ? 'таймаут' : e && e.message) || 'ошибка';
 async function nf(url, o = {}, label = 'Нет связи с сервером') {
-  try { return await fetch(url, { ...o, signal: AbortSignal.timeout(20000) }); }
-  catch (e) { throw new Error(`${label} (${why(e)})`); }
+  // Chromium-сеть (лучше Node fetch при нескольких IP/IPv6) + повторы при сбое соединения
+  const get = (o.method || 'GET') === 'GET';
+  let err;
+  for (let i = 0; i < 3; i++) {
+    try { return await enet.fetch(url, { ...o, signal: AbortSignal.timeout(20000) }); }
+    catch (e) {
+      err = e;
+      const msg = why(e) + ' ' + (e && e.message);
+      if (!get && !/CONNECT|ERR_CONNECTION|ERR_NAME|ERR_INTERNET|ENOTFOUND/i.test(msg)) break; // POST/DELETE повторяем только если запрос точно не ушёл
+      await new Promise(r => setTimeout(r, 700 * (i + 1)));
+    }
+  }
+  throw new Error(`${label} (${why(err)})`);
 }
 async function raw(p, o = {}) { // пробуем BASE и BASE/api
   if (prefix !== null) return nf(BASE + prefix + p, o);
   let last;
   for (const pf of ['', '/api']) {
     try {
-      const r = await fetch(BASE + pf + p, { ...o, signal: AbortSignal.timeout(20000) });
+      const r = await nf(BASE + pf + p, o);
       if ((r.headers.get('content-type') || '').includes('json')) { prefix = pf; return r; }
       last = r;
     } catch (e) { last = e; }
   }
-  if (last instanceof Error) throw new Error(`Нет связи с сервером (${why(last)})`);
+  if (last instanceof Error) throw last;
   throw new Error('API не найден по адресу ' + BASE + ' (задай MIKAELA_API)');
 }
 const J = { 'Content-Type': 'application/json' };
@@ -180,6 +191,7 @@ async function devices() {
   const n = typeof d.total === 'number' ? d.total : typeof d.connected === 'number' ? d.connected : list.length;
   return { list, count: n, limit: d.device_limit != null ? d.device_limit : (d.limit != null ? d.limit : null) };
 }
+const resetDevices = () => jcall('/cabinet/subscription/devices', 'DELETE');
 const delDevice = h => jcall('/cabinet/subscription/devices/' + encodeURIComponent(h), 'DELETE');
 const methods = () => jcall('/cabinet/balance/payment-methods');
 async function topup(o) {
@@ -352,6 +364,7 @@ h('pick', async tag => {
 });
 h('devices', devices);
 h('deldevice', delDevice);
+h('resetdevices', resetDevices);
 h('hwid', async () => hwid());
 h('methods', methods);
 h('topup', topup);
