@@ -23,7 +23,7 @@ a{color:var(--ac);cursor:pointer;font-size:13px}
 .row{display:flex;justify-content:space-between;margin-top:6px}
 </style></head><body>
 
-<div id="login" class="hide">
+<div id="login">
   <h1>Mikaela VPN</h1><div class="mut">Аккаунт общий с ботом и кабинетом</div>
   <div class="card">
     <div class="tabs"><button id="tL" class="act">Вход</button><button id="tR">Регистрация</button></div>
@@ -58,23 +58,23 @@ a{color:var(--ac);cursor:pointer;font-size:13px}
 const $=id=>document.getElementById(id);let mode='tun',on=false,busy=false,reg=false,tgWait=false;
 const show=v=>{$('login').classList.toggle('hide',v!=='login');$('main').classList.toggle('hide',v!=='main')};
 const say=(t,ok)=>{$('msg').className=ok?'g':'e';$('msg').textContent=t||''};
-async function init(){const r=await vpn.session();r.data?enter(r.data):show('login')}
+async function init(){try{const r=await vpn.session();r.data?enter(r.data):show('login')}catch(e){show('login');say('Ошибка запуска: '+e.message)}}
 async function enter(u){show('main');setUser(u);const m=await vpn.me();if(m.ok&&m.data)setUser(m.data);else if(m.error==='AUTH')return show('login');await refreshSub();poll()}
 function setUser(u){if(!u)return;$('who').textContent=u.email||(u.username?'@'+u.username:'')||'';
   const b=u.balance_kopeks!=null?u.balance_kopeks/100:u.balance_rubles;if(b!=null)$('bal').textContent=Number(b).toFixed(2)+' ₽'}
 function tab(r){reg=r;$('tL').classList.toggle('act',!r);$('tR').classList.toggle('act',r);$('nm').classList.toggle('hide',!r);
-  $('go').textContent=r?'Зарегистрироваться':'Войти';$('fgW').classList.toggle('hide',r);$('pw').querySelector('input').placeholder=r?'Пароль (минимум 8 символов)':'Пароль';say('')}
+  $('go').textContent=r?'Зарегистрироваться':'Войти';$('fgW').classList.toggle('hide',r);$('pw').placeholder=r?'Пароль (минимум 8 символов)':'Пароль';say('')}
 $('tL').onclick=()=>tab(false);$('tR').onclick=()=>tab(true);
-$('eye').onclick=()=>{const i=$('pw').querySelector('input');const h=i.type==='password';i.type=h?'text':'password';$('eye').textContent=h?'Скрыть':'Показать'};
+$('eye').onclick=()=>{const i=$('pw');const h=i.type==='password';i.type=h?'text':'password';$('eye').textContent=h?'Скрыть':'Показать'};
 $('go').onclick=async()=>{
-  say('');const e=$('em').value.trim(),p=$('pw').querySelector('input').value;
+  say('');const e=$('em').value.trim(),p=$('pw').value;
   if(!e||!p)return say('Введите почту и пароль');
   if(reg){if(p.length<8)return say('Пароль минимум 8 символов');
     const r=await vpn.register(e,p,$('nm').value.trim());
     if(r.ok){say(r.data+' После подтверждения почты нажмите «Вход».',true);tab(false);$('em').value=e}else say(r.error)}
   else{const r=await vpn.login(e,p);r.ok?enter(r.data):say(r.error)}
 };
-$('pw').querySelector('input').onkeydown=e=>e.key==='Enter'&&$('go').click();
+$('pw').onkeydown=e=>e.key==='Enter'&&$('go').click();
 $('fg').onclick=async()=>{const e=$('em').value.trim();if(!e)return say('Сначала введите почту');const r=await vpn.forgot(e);r.ok?say(r.data,true):say(r.error)};
 $('tg').onclick=async()=>{
   if(tgWait){await vpn.tgCancel();return}
