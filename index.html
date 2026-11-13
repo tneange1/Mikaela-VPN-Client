@@ -270,7 +270,7 @@ $('big').onclick=async()=>{
   busy=false;poll()};
 async function poll(){const r=await vpn.status();if(!r.ok)return;on=r.data.running;
   $('big').classList.toggle('on',on);if(!busy)$('st').textContent=on?'Подключено':'Отключено';
-  if(r.data.error)$('err2').textContent=r.data.error;
+  if(r.data.error)$('err2').textContent=r.data.error;else if(r.data.warn)$('err2').textContent=r.data.warn;
   if(r.data.ea&&r.data.ea!==S.ea){S.ea=r.data.ea;if(S.list.length)loadServers(false)}}
 const live=()=>!$('app').classList.contains('hide');
 setInterval(()=>{if(live())poll()},3000);
