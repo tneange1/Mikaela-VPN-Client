@@ -331,15 +331,24 @@ async function servers(o) {
   }
   await loadEntries(true); return view();
 }
-const tcpPing = h => new Promise(res => {
-  const t = Date.now(), s = net.connect({ host: h.host, port: h.port, timeout: 3000 }, () => { const d = Date.now() - t; s.destroy(); res(d); });
-  s.on('error', () => res(-1)); s.on('timeout', () => { s.destroy(); res(-1); });
-});
-async function pingOne(e) { if (e.udp) return -2; const r = (await Promise.all(e.hosts.map(tcpPing))).filter(x => x >= 0); return r.length ? Math.min(...r) : -1; }
+const tcpPing = async h => { // сначала определяем IP (системный DNS -> DoH), потом TCP; запоминаем причину сбоя
+  const ip = await resolveHost(h.host);
+  if (!ip) return { ms: -1, why: 'DNS не резолвит' };
+  return new Promise(res => {
+    const t = Date.now(), s = net.connect({ host: ip, port: h.port, timeout: 3000 }, () => { const d = Date.now() - t; s.destroy(); res({ ms: d }); });
+    s.on('error', e => res({ ms: -1, why: 'TCP ' + (e.code || 'ошибка') }));
+    s.on('timeout', () => { s.destroy(); res({ ms: -1, why: `TCP ${ip}:${h.port} не отвечает` }); });
+  });
+};
+async function pingOne(e) {
+  if (e.udp) return { ms: -2 };
+  const rs = await Promise.all(e.hosts.map(tcpPing)), ok = rs.filter(r => r.ms >= 0);
+  return ok.length ? { ms: Math.min(...ok.map(r => r.ms)) } : { ms: -1, why: [...new Set(rs.map(r => r.why))].join(' / ') };
+}
 async function pingMany(tags) {
-  const res = {};
-  await Promise.all(tags.map(async t => { const e = (entries || []).find(x => x.tag === t); res[t] = e ? await pingOne(e) : -1; }));
-  log('ping', Object.entries(res).map(([t, v]) => `${t.replace(/[\u{1F1E6}-\u{1F1FF}]{2}\s*/gu, '')}: ${v === -2 ? 'UDP' : v < 0 ? '—' : v + ' мс'}`).join(', '));
+  const res = {}, whys = {};
+  await Promise.all(tags.map(async t => { const e = (entries || []).find(x => x.tag === t), r = e ? await pingOne(e) : { ms: -1 }; res[t] = r.ms; if (r.why) whys[t] = r.why; }));
+  log('ping', Object.entries(res).map(([t, v]) => `${t.replace(/[\u{1F1E6}-\u{1F1FF}]{2}\s*/gu, '')}: ${v === -2 ? 'UDP' : v < 0 ? '— (' + (whys[t] || '?') + ')' : v + ' мс'}`).join('; '));
   return res;
 }
 function logAdapters(tag) { // виден ли TUN-адаптер
@@ -566,7 +575,7 @@ async function diag() {
     try { const { r, ms } = await probe(u, 8000); log('diag', `${n}: HTTP ${r.status}, ${ms} мс${n === 'внешний IP' ? ' → ' + (await r.text()).slice(0, 40) : ''}`); }
     catch (e) { log('diag', `${n}: ОШИБКА ${why(e)}`); }
   }
-  for (const h of ['1.1.1.1', ...((entries && entries[0] && entries[0].hosts.slice(0, 2).map(x => x.host)) || [])]) log('diag', `TCP ${h}:443 → ${await tcpPing({ host: h, port: 443 })} мс`);
+  for (const h of ['1.1.1.1', ...((entries || []).flatMap(e => e.hosts.slice(0, 1).map(x => x.host)).slice(0, 6))]) { const r = await tcpPing({ host: h, port: 443 }); log('diag', `TCP ${h}:443 → ${r.ms >= 0 ? r.ms + ' мс' : 'нет (' + r.why + ')'}`); }
   logAdapters('diag'); await sleep(800);
   log('diag', '=== конец ===');
   return true;
