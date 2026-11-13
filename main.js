@@ -1,5 +1,5 @@
 const { app, BrowserWindow, ipcMain, safeStorage, shell, session: ses, net: enet, clipboard } = require('electron');
-const path = require('path'), fs = require('fs'), net = require('net'), os = require('os'), crypto = require('crypto');
+const path = require('path'), fs = require('fs'), net = require('net'), os = require('os'), crypto = require('crypto'), dns = require('dns');
 const { spawn, execFileSync, execFile } = require('child_process');
 
 const BASE = process.env.MIKAELA_API || 'https://cabinet.mikaelavpn.xyz';
@@ -11,6 +11,7 @@ const BAD = ['0.0.0.0', '127.0.0.1', 'localhost', '::', '::1'];
 
 let win = null, tgCancel = false, session = null, prefix = null;
 let xray = null, sb = null, stopping = false, restarting = false, lastFail = '', lastLevel = 'warning', curTag = '';
+let lastWarn = '';
 let entries = null, entriesAt = 0, disk = null, stale = false, bgBusy = false; // disk: кэш подписки {url, at, arr}
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const sFile = () => path.join(app.getPath('userData'), 'session.bin');
@@ -36,6 +37,17 @@ setInterval(() => {
     fs.appendFileSync(f, txt);
   } catch {}
 }, 700);
+const rl = new Map(); // key -> {n, t0, supp, tag}
+function logRL(tag, msg) { // выводы xray/sing-box: убираем шум и схлопываем повторы
+  if (/found process path|connection (upload|download) (finished|closed)/i.test(msg)) return;
+  if (/FATAL|ERROR|panic|failed to start|WARN/i.test(msg)) return log(tag, msg);
+  const key = tag + msg.replace(/\d{4}\/\d\d\/\d\d \d\d:\d\d:\d\d(\.\d+)?/g, '').replace(/\[\d+( [\d.]+m?s)?\]/g, '[]').replace(/\d+\.\d+\.\d+\.\d+/g, 'IP').replace(/\b\d{4,5}\b/g, 'P').replace(/[\d.]+m?s\b/g, '');
+  const now = Date.now(); let e = rl.get(key);
+  if (!e || now - e.t0 > 5000) { if (e && e.supp) log(tag, `  … ещё ×${e.supp} таких же строк`); e = { n: 0, t0: now, supp: 0, tag }; rl.set(key, e); }
+  if (++e.n <= 3) log(tag, msg); else e.supp++;
+  if (rl.size > 3000) rl.clear();
+}
+setInterval(() => { const now = Date.now(); for (const [k, e] of rl) if (now - e.t0 > 5000) { if (e.supp) log(e.tag, `  … ещё ×${e.supp} таких же строк`); rl.delete(k); } }, 5000);
 const safeUrl = u => { try { const x = new URL(u); return x.host + x.pathname.split('/').map(s => /^(?=.*\d)[A-Za-z0-9_-]{8,}$/.test(s) ? s.slice(0, 4) + '…' : s).join('/'); } catch { return String(u); } };
 
 function save() {
@@ -367,24 +379,58 @@ function run(name, exe, args, env) {
   const p = spawn(path.join(binDir(), exe), args, { windowsHide: true, cwd: binDir(), env: { ...process.env, ...env } });
   log(name, `запуск: ${exe} ${args.map(a => path.basename(a)).join(' ')} (pid ${p.pid})`);
   let tail = '';
-  const feed = d => String(d).split(/\r?\n/).filter(Boolean).forEach(l => { log(name, l); tail = (tail + '\n' + l).slice(-1500); });
+  const feed = d => String(d).split(/\r?\n/).filter(Boolean).forEach(l => { logRL(name, l); tail = (tail + '\n' + l).slice(-1500); });
   p.stdout.on('data', feed); p.stderr.on('data', feed);
   p.on('error', e => { p.failed = e.message; log(name, 'не запустился: ' + e.message); });
   p.tail = () => tail.trim();
   return p;
 }
-function xrayConfig(entry, level) {
+function pinAddress(o, ips) { // подставить IP сервера, SNI/host остаются прежними
+  const st = o.settings || {}, v = (st.vnext && st.vnext[0]) || (st.servers && st.servers[0]) || st, h = v && v.address;
+  if (!h || !ips[h] || ips[h] === h) return;
+  const ss = o.streamSettings = o.streamSettings || {};
+  if (ss.security === 'tls') { const t = ss.tlsSettings = ss.tlsSettings || {}; if (!t.serverName) t.serverName = h; }
+  else if (ss.security === 'reality') { const r = ss.realitySettings = ss.realitySettings || {}; if (!r.serverName) r.serverName = h; }
+  if (ss.xhttpSettings && !ss.xhttpSettings.host) ss.xhttpSettings.host = h;
+  if (ss.wsSettings && !ss.wsSettings.host && !(ss.wsSettings.headers && ss.wsSettings.headers.Host)) ss.wsSettings.host = h;
+  v.address = ips[h];
+}
+function xrayConfig(entry, level, ips) {
   const c = JSON.parse(JSON.stringify(entry.cfg));
   delete c.meta; delete c.remarks; delete c.remnawave;
-  const old = (c.inbounds || []).find(i => i.protocol === 'socks');
+  for (const o of (c.outbounds || [])) if (isProxy(o)) pinAddress(o, ips);
   c.inbounds = [{ tag: 'socks', listen: '127.0.0.1', port: XRAY_PORT, protocol: 'socks', settings: { auth: 'noauth', udp: true, ip: '127.0.0.1' },
-    sniffing: (old && old.sniffing) || { enabled: true, destOverride: ['http', 'tls', 'quic'], routeOnly: false } }];
+    sniffing: { enabled: true, destOverride: ['http', 'tls', 'quic'], routeOnly: true } }]; // routeOnly: адрес назначения не подменяется доменом
   c.log = { loglevel: level };
   return c;
 }
+async function resolveHost(h) {
+  if (net.isIP(h)) return h;
+  try { const r = await Promise.race([dns.promises.lookup(h, { family: 4 }), sleep(4000).then(() => { throw new Error('таймаут'); })]); return r.address; }
+  catch (e) { log('dns', `${h}: системный DNS не ответил (${e.code || e.message})`); }
+  for (const u of [`https://1.1.1.1/dns-query?name=${h}&type=A`, `https://8.8.8.8/resolve?name=${h}&type=A`]) {
+    try {
+      const r = await enet.fetch(u, { headers: { accept: 'application/dns-json' }, signal: AbortSignal.timeout(5000) });
+      const a = ((await r.json()).Answer || []).find(x => x.type === 1);
+      if (a) { log('dns', `${h}: получен через DoH`); return a.data; }
+    } catch {}
+  }
+  const old = disk && disk.ips && disk.ips[h];
+  if (old) log('dns', `${h}: используем прошлый IP из кэша`);
+  return old || null;
+}
+async function resolveAll(hosts) {
+  const map = {}, t0 = Date.now();
+  await Promise.all(hosts.map(async h => { const ip = await resolveHost(h); if (ip) { map[h] = ip; if (!net.isIP(h) && disk) { disk.ips = disk.ips || {}; disk.ips[h] = ip; } } else log('dns', `${h}: IP определить не удалось`); }));
+  if (disk) saveDisk();
+  log('dns', 'адреса серверов: ' + (Object.entries(map).filter(([h]) => !net.isIP(h)).map(([h, ip]) => `${h}→${ip}`).join(', ') || '—') + ` (${Date.now() - t0} мс)`);
+  return map;
+}
 async function startXray(entry, level) {
+  const hosts = [...new Set((entry.cfg.outbounds || []).filter(isProxy).map(o => { const h = hostOf(o); return h && h.host; }).filter(Boolean))];
+  const ips = await resolveAll(hosts);
   const f = path.join(app.getPath('userData'), 'xray-config.json');
-  fs.writeFileSync(f, JSON.stringify(xrayConfig(entry, level), null, 2));
+  fs.writeFileSync(f, JSON.stringify(xrayConfig(entry, level, ips), null, 2));
   log('xray', `сервер «${entry.tag}»${entry.auto ? ` (автовыбор, ${entry.count} узлов)` : ''}`);
   const p = run('xray', 'xray.exe', ['run', '-c', f], { XRAY_LOCATION_ASSET: binDir() });
   xray = p; savePids();
@@ -398,6 +444,43 @@ async function startXray(entry, level) {
     if (await portOpen(XRAY_PORT, 400)) { log('xray', `socks-порт ${XRAY_PORT} готов (${(i + 1) * 300} мс)`); return; }
   }
   throw new Error('Xray не открыл порт ' + XRAY_PORT + ': ' + p.tail());
+}
+function socksProbe(ms) { // HTTP-запрос к 1.1.1.1:80 через локальный socks Xray (до включения TUN)
+  return new Promise((resolve, reject) => {
+    const t0 = Date.now(); let step = 0, buf = Buffer.alloc(0), done = false;
+    const s = net.connect({ host: '127.0.0.1', port: XRAY_PORT });
+    const fin = (err, val) => { if (done) return; done = true; clearTimeout(tm); s.destroy(); err ? reject(err) : resolve(val); };
+    const tm = setTimeout(() => fin(new Error(`нет ответа за ${ms / 1000} с`)), ms);
+    s.on('error', e => fin(e));
+    s.on('connect', () => s.write(Buffer.from([5, 1, 0])));
+    s.on('data', d => {
+      buf = Buffer.concat([buf, d]);
+      if (step === 0) { if (buf.length < 2) return; if (buf[0] !== 5 || buf[1] !== 0) return fin(new Error('socks: отказ')); buf = buf.slice(2); step = 1; s.write(Buffer.from([5, 1, 0, 1, 1, 1, 1, 1, 0, 80])); }
+      if (step === 1) {
+        if (buf.length < 10) return;
+        if (buf[1] !== 0) return fin(new Error('socks: ошибка ' + buf[1] + ' (сервер не принял соединение)'));
+        const len = buf[3] === 1 ? 10 : buf[3] === 4 ? 22 : 7 + buf[4]; if (buf.length < len) return;
+        buf = buf.slice(len); step = 2; s.write('GET / HTTP/1.1\r\nHost: 1.1.1.1\r\nConnection: close\r\n\r\n');
+      }
+      if (step === 2) { const m = /^HTTP\/1\.[01] (\d{3})/.exec(buf.toString('latin1')); if (m) fin(null, { status: +m[1], ms: Date.now() - t0 }); }
+    });
+  });
+}
+async function verifyTunnel(entry) { // убеждаемся, что через сервер реально идёт трафик — до изменения сети Windows
+  const tries = entry.auto ? 3 : 2; let last;
+  for (let i = 0; i < tries; i++) {
+    try { const r = await socksProbe(7000); log('xray', `проверка канала через «${entry.tag}»: HTTP ${r.status}, ${r.ms} мс ✓`); return; }
+    catch (e) { last = e; log('xray', `проверка канала #${i + 1}: ${e.message}`); }
+    await sleep(1200);
+  }
+  throw new Error(`Через сервер «${entry.tag}» трафик не идёт (${last.message}). Сервер недоступен или заблокирован — выберите другой (вкладка «Серверы» → «Тест пинга»).`);
+}
+function happAdapter() {
+  try {
+    const out = execFileSync('netsh', ['interface', 'show', 'interface'], { windowsHide: true }).toString('latin1');
+    const m = out.split(/\r?\n/).find(l => /happ|nekoray|clash|v2ray/i.test(l));
+    return m ? m.trim().split(/\s{2,}/).pop() : '';
+  } catch { return ''; }
 }
 async function startSingbox(level) {
   const cfg = {
@@ -442,7 +525,7 @@ async function afterConnectTest() {
   await sleep(1500);
   for (const [name, url] of [['gstatic 204', 'http://www.gstatic.com/generate_204'], ['внешний IP', 'https://api.ipify.org']]) {
     try { const { r, ms } = await probe(url); log('test', `${name}: HTTP ${r.status}, ${ms} мс${name === 'внешний IP' ? ' → ' + (await r.text()).slice(0, 40) : ''}`); }
-    catch (e) { log('test', `${name}: ОШИБКА ${why(e)} — трафик через туннель не проходит`); }
+    catch (e) { log('test', `${name}: ОШИБКА ${why(e)} — канал Xray проверен, значит проблема в TUN/DNS (смотрите [sing-box] и [tun])`); }
   }
 }
 async function connect(o = {}) {
@@ -451,10 +534,13 @@ async function connect(o = {}) {
   log('app', `=== подключение: сервер «${o.server || '—'}», логи: ${lastLevel} ===`);
   try {
     checkBins();
+    const hp = happAdapter();
+    if (hp) { lastWarn = `Найден активный сетевой адаптер «${hp}» (Happ или другой VPN). Закройте его полностью (выход из трея) — два TUN конфликтуют.`; log('app', '⚠ ' + lastWarn); }
     const ents = await loadEntries(true, true);
     const entry = ents.find(e => e.tag === o.server) || ents[0];
     curTag = entry.tag;
     await startXray(entry, lastLevel);
+    await verifyTunnel(entry);
     await startSingbox(lastLevel);
     log('app', 'подключено'); afterConnectTest().catch(() => {}); setTimeout(refreshBg, 6000);
     return true;
@@ -467,7 +553,7 @@ async function pick(tag) {
   if (!e) return false;
   log('app', `переключение на «${tag}»`);
   restarting = true;
-  try { if (xray) { xray.removeAllListeners('exit'); xray.kill(); xray = null; } await sleep(300); await startXray(e, lastLevel); }
+  try { if (xray) { xray.removeAllListeners('exit'); xray.kill(); xray = null; } await sleep(300); await startXray(e, lastLevel); await verifyTunnel(e); }
   catch (err) { await stopAll('ошибка переключения'); throw err; }
   finally { restarting = false; }
   return true;
@@ -496,7 +582,7 @@ h('logout', async () => { await stopAll('выход'); try { await authed('/cabi
 h('sub', getSub);
 h('connect', connect);
 h('disconnect', () => stopAll('по кнопке'));
-h('status', async () => { const e = lastFail; lastFail = ''; return { running: !!(xray && sb), error: e, ea: entriesAt, stale }; });
+h('status', async () => { const e = lastFail, w = lastWarn; lastFail = ''; lastWarn = ''; return { running: !!(xray && sb), error: e, warn: w, ea: entriesAt, stale }; });
 h('servers', servers);
 h('pingmany', pingMany);
 h('pick', pick);
