@@ -196,16 +196,16 @@ async function loadServers(force){
   const r=await vpn.servers({force});
   if(!r.ok){$('list').innerHTML='';return $('srvErr').textContent=r.error}
   S.list=r.data.list;if(!S.list.find(x=>x.tag===S.server)){S.server=S.list[0]?S.list[0].tag:'';ls.set('server',S.server)}
-  $('upd').textContent='Автообновление: 1 ч · обновлено '+new Date(r.data.at||Date.now()).toLocaleTimeString('ru',{hour:'2-digit',minute:'2-digit'});
+  $('upd').textContent='Автообновление: 1 ч · обновлено '+new Date(r.data.at||Date.now()).toLocaleTimeString('ru',{hour:'2-digit',minute:'2-digit'})+(r.data.stale?' · из кэша':'');
   renderServers();renderCur()}
 function renderServers(){
   $('list').innerHTML=S.list.map((s,i)=>{const p=parse(s.tag),pg=S.ping[s.tag];
     const sub=s.auto?`Автовыбор · ${s.count} узлов`:[s.proto,s.net,s.sec].filter(Boolean).join(' / ');
-    return `<div class="srv clk ${s.tag===S.server?'sel':''}" data-i="${i}">${badge(p.code)}<div><div class="n">${esc(p.label)}</div><div class="s">${esc(sub)}</div></div><div class="p">${pg==null?'':pg<0?'—':pg+' мс'}</div></div>`}).join('')||'<div class="mut" style="padding:10px">Нет серверов</div>';
+    return `<div class="srv clk ${s.tag===S.server?'sel':''}" data-i="${i}">${badge(p.code)}<div><div class="n">${esc(p.label)}</div><div class="s">${esc(sub)}</div></div><div class="p">${pg==null?'':pg===-2?'UDP':pg<0?'—':pg+' мс'}</div></div>`}).join('')||'<div class="mut" style="padding:10px">Нет серверов</div>';
   document.querySelectorAll('.srv.clk').forEach(el=>el.onclick=()=>pick(S.list[+el.dataset.i].tag))}
 function renderCur(){const s=S.list.find(x=>x.tag===S.server);$('curName').textContent=s?parse(s.tag).label:'Авто'}
 async function pick(t){S.server=t;ls.set('server',t);renderServers();renderCur();if(on)$('st').textContent='Переключаю…';const r=await vpn.pick(t);if(!r.ok)$('err2').textContent=r.error;poll()}
-$('pingAll').onclick=()=>S.list.filter(s=>!s.auto).forEach(async s=>{S.ping[s.tag]=undefined;const r=await vpn.ping(s.tag);S.ping[s.tag]=r.ok?r.data:-1;renderServers()});
+let pinging=false;$('pingAll').onclick=async()=>{if(pinging)return;pinging=true;S.list.forEach(s=>S.ping[s.tag]=undefined);renderServers();const r=await vpn.pingMany(S.list.map(s=>s.tag));if(r.ok)Object.assign(S.ping,r.data);pinging=false;renderServers()};
 $('reload').onclick=()=>loadServers(true);
 
 /* ---------- устройства ---------- */
@@ -270,7 +270,8 @@ $('big').onclick=async()=>{
   busy=false;poll()};
 async function poll(){const r=await vpn.status();if(!r.ok)return;on=r.data.running;
   $('big').classList.toggle('on',on);if(!busy)$('st').textContent=on?'Подключено':'Отключено';
-  if(r.data.error)$('err2').textContent=r.data.error}
+  if(r.data.error)$('err2').textContent=r.data.error;
+  if(r.data.ea&&r.data.ea!==S.ea){S.ea=r.data.ea;if(S.list.length)loadServers(false)}}
 const live=()=>!$('app').classList.contains('hide');
 setInterval(()=>{if(live())poll()},3000);
 setInterval(async()=>{if(!live())return;refreshSub();const m=await vpn.me();if(m.ok&&m.data)setUser(m.data)},60000);
