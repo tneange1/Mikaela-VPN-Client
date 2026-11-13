@@ -1,6 +1,6 @@
 const { app, BrowserWindow, ipcMain, safeStorage, shell, session: ses, net: enet, clipboard } = require('electron');
 const path = require('path'), fs = require('fs'), net = require('net'), os = require('os'), crypto = require('crypto');
-const { spawn, execFileSync } = require('child_process');
+const { spawn, execFileSync, execFile } = require('child_process');
 
 const BASE = process.env.MIKAELA_API || 'https://cabinet.mikaelavpn.xyz';
 const CABINET = 'https://cabinet.mikaelavpn.xyz/';
@@ -11,7 +11,7 @@ const BAD = ['0.0.0.0', '127.0.0.1', 'localhost', '::', '::1'];
 
 let win = null, tgCancel = false, session = null, prefix = null;
 let xray = null, sb = null, stopping = false, restarting = false, lastFail = '', lastLevel = 'warning', curTag = '';
-let entries = null, entriesAt = 0;
+let entries = null, entriesAt = 0, disk = null, stale = false, bgBusy = false; // disk: кэш подписки {url, at, arr}
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const sFile = () => path.join(app.getPath('userData'), 'session.bin');
 const binDir = () => app.isPackaged ? path.join(process.resourcesPath, 'bin') : path.join(__dirname, 'bin');
@@ -71,18 +71,19 @@ const subHeaders = () => ({ 'User-Agent': UA, 'x-hwid': hwid(), 'x-device-os': '
 // ---------- сеть ----------
 const why = e => (e && e.cause && (e.cause.code || e.cause.message)) || (e && e.name === 'TimeoutError' ? 'таймаут' : e && e.message) || 'ошибка';
 async function nf(url, o = {}, label = 'Нет связи с сервером') {
-  const get = (o.method || 'GET') === 'GET', m = o.method || 'GET', t0 = Date.now();
+  const { timeout = 10000, tries = 2, ...fo } = o;
+  const m = fo.method || 'GET', get = m === 'GET', t0 = Date.now();
   let err;
-  for (let i = 0; i < 3; i++) {
+  for (let i = 0; i < tries; i++) {
     try {
-      const r = await enet.fetch(url, { ...o, signal: AbortSignal.timeout(20000) });
+      const r = await enet.fetch(url, { ...fo, signal: AbortSignal.timeout(timeout) });
       log('net', `${m} ${safeUrl(url)} → ${r.status} (${Date.now() - t0} мс)`);
       return r;
     } catch (e) {
       err = e;
-      log('net', `${m} ${safeUrl(url)} ✗ ${why(e)} (попытка ${i + 1}/3)`);
+      log('net', `${m} ${safeUrl(url)} ✗ ${why(e)} (попытка ${i + 1}/${tries})`);
       if (!get && !/CONNECT|ERR_CONNECTION|ERR_NAME|ERR_INTERNET|ENOTFOUND/i.test(why(e) + ' ' + (e && e.message))) break;
-      await sleep(700 * (i + 1));
+      if (i < tries - 1) await sleep(600);
     }
   }
   throw new Error(`${label} (${why(err)})`);
@@ -204,7 +205,12 @@ async function me() {
   }
   return session.user;
 }
-const getSub = () => jcall('/cabinet/subscription');
+const getSub = async () => {
+  const d = await jcall('/cabinet/subscription');
+  const u = d.subscription && d.subscription.subscription_url;
+  if (u && (!disk || disk.url !== u)) { disk = { url: u, at: disk ? disk.at : 0, arr: disk ? disk.arr : null }; saveDisk(); log('sub', 'адрес подписки обновлён из кабинета'); }
+  return d;
+};
 
 // ---------- устройства, баланс, продление ----------
 async function devices() {
@@ -246,22 +252,22 @@ function buildEntries(arr) {
     const name = cfg.remarks || cfg.ps || 'server';
     let t = name, i = 2; while (seen.has(t)) t = `${name} ${i++}`; seen.add(t);
     const ss = subj[0].streamSettings || {};
-    out.push({ tag: t, cfg, auto: !!bal && subj.length > 1, count: subj.length, hosts: hosts.filter(h => !BAD.includes(h.host)),
+    out.push({ tag: t, cfg, udp: /hysteria/i.test(String(subj[0].protocol) + ' ' + String(ss.network)), auto: !!bal && subj.length > 1, count: subj.length, hosts: hosts.filter(h => !BAD.includes(h.host)),
       proto: String(subj[0].protocol || '').toUpperCase(), net: String(ss.network || 'tcp').toUpperCase(), sec: ss.security && ss.security !== 'none' ? String(ss.security).toUpperCase() : '' });
   }
   return out;
 }
-async function fetchEntries() {
-  const s = await getSub();
-  const url = s.subscription && s.subscription.subscription_url;
-  if (!url) throw new Error('Нет активной подписки. Оформи её в боте или кабинете.');
-  log('sub', `подписка: ${safeUrl(url)} (UA ${UA}, HWID ${hwid().slice(0, 8)}…)`);
+const cacheFile = () => path.join(app.getPath('userData'), 'sub-cache.bin');
+function loadDisk() { try { const b = fs.readFileSync(cacheFile()); disk = JSON.parse(safeStorage.isEncryptionAvailable() ? safeStorage.decryptString(b) : b.toString()); } catch { disk = null; } }
+function saveDisk() { try { const j = JSON.stringify(disk); fs.writeFileSync(cacheFile(), safeStorage.isEncryptionAvailable() ? safeStorage.encryptString(j) : Buffer.from(j)); } catch {} }
+
+async function pullArr(url, fast) { // скачать Xray JSON с панели (кабинет не нужен)
   const base = new URL(url).pathname.replace(/\/+$/, '');
   const withPath = sfx => { const x = new URL(url); x.pathname = base + sfx; return x.toString(); };
   let lastE = '';
   for (const [u, label] of [[url, 'базовая ссылка'], [withPath('/json'), 'ссылка /json']]) {
     try {
-      const r = await nf(u, { headers: subHeaders() }, 'Подписка недоступна');
+      const r = await nf(u, { headers: subHeaders(), timeout: fast ? 8000 : 15000, tries: fast ? 1 : 2 }, 'Панель недоступна');
       const text = await r.text();
       log('sub', `${label}: HTTP ${r.status}, ${text.length} байт, тип ${r.headers.get('content-type')}`);
       let j; try { j = JSON.parse(text); } catch {
@@ -272,32 +278,63 @@ async function fetchEntries() {
       const arr = Array.isArray(j) ? j : (j && Array.isArray(j.outbounds) ? [j] : null);
       if (!arr || !arr.length) { lastE = 'JSON без конфигов'; log('sub', lastE); continue; }
       const ents = buildEntries(arr);
-      if (ents.length) { log('sub', `серверов: ${ents.length}: ` + ents.map(e => e.tag + (e.auto ? ` [авто, ${e.count} узлов]` : '')).join('; ')); return ents; }
+      if (ents.length) { log('sub', `серверов: ${ents.length}: ` + ents.map(e => e.tag + (e.auto ? ` [авто, ${e.count} узлов]` : '') + (e.udp ? ' [UDP]' : '')).join('; ')); return arr; }
       lastE = ph ? 'панель вернула заглушку — вероятно, достигнут лимит устройств (удалите лишнее на вкладке «Устройства»)' : 'в ответе нет подходящих серверов';
       log('sub', lastE);
     } catch (e) { lastE = e.message; log('sub', 'ошибка: ' + e.message); }
   }
-  throw new Error('Не удалось получить подписку: ' + lastE);
+  throw new Error(lastE);
 }
-async function loadEntries(force) {
+async function pullEntries(url, fast) { const arr = await pullArr(url, fast); disk = { url, at: Date.now(), arr }; saveDisk(); stale = false; return buildEntries(arr); }
+async function fetchEntries(fast) {
+  const cached = disk && disk.url; let prevErr = '';
+  if (cached) { // сначала напрямую в панель по сохранённому адресу — кабинет не нужен
+    log('sub', `подписка: ${safeUrl(cached)} (адрес из кэша)`);
+    try { return await pullEntries(cached, fast); } catch (e) { prevErr = e.message; log('sub', 'по сохранённому адресу не вышло: ' + prevErr); }
+  }
+  const s = await getSub(); // кабинет
+  const url = s.subscription && s.subscription.subscription_url;
+  if (!url) throw new Error('Нет активной подписки. Оформи её в боте или кабинете.');
+  if (url === cached) throw new Error('Не удалось получить подписку: ' + prevErr);
+  log('sub', `подписка: ${safeUrl(url)} (адрес от кабинета)`);
+  try { return await pullEntries(url, fast); } catch (e) { throw new Error('Не удалось получить подписку: ' + e.message); }
+}
+async function loadEntries(force, fast) {
   if (!force && entries && Date.now() - entriesAt < 3600000) return entries;
-  entries = await fetchEntries(); entriesAt = Date.now();
-  return entries;
+  try { entries = await fetchEntries(fast); entriesAt = Date.now(); stale = false; return entries; }
+  catch (e) {
+    if (disk && disk.arr) {
+      const ents = buildEntries(disk.arr);
+      if (ents.length) { log('sub', `⚠ используем сохранённую подписку от ${new Date(disk.at).toLocaleString('ru')} (${e.message})`); entries = ents; entriesAt = Date.now() - 3000000; stale = true; return entries; }
+    }
+    throw e;
+  }
 }
-const servers = async o => {
-  const ents = await loadEntries(o && o.force);
-  return { list: ents.map(e => ({ tag: e.tag, auto: e.auto, count: e.count, proto: e.proto, net: e.net, sec: e.sec })), at: entriesAt };
-};
+const view = () => ({ list: entries.map(e => ({ tag: e.tag, auto: e.auto, count: e.count, proto: e.proto, net: e.net, sec: e.sec, udp: e.udp })), at: entriesAt, stale });
+function refreshBg() { if (bgBusy) return; bgBusy = true; loadEntries(true).catch(() => {}).finally(() => { bgBusy = false; }); }
+async function servers(o) {
+  if (!(o && o.force)) {
+    if (!entries && disk && disk.arr) { entries = buildEntries(disk.arr); entriesAt = disk.at || 0; stale = true; log('sub', 'список серверов из кэша'); }
+    if (entries && entries.length) { if (Date.now() - entriesAt > 3600000) refreshBg(); return view(); }
+  }
+  await loadEntries(true); return view();
+}
 const tcpPing = h => new Promise(res => {
   const t = Date.now(), s = net.connect({ host: h.host, port: h.port, timeout: 3000 }, () => { const d = Date.now() - t; s.destroy(); res(d); });
   s.on('error', () => res(-1)); s.on('timeout', () => { s.destroy(); res(-1); });
 });
-async function ping(tag) {
-  const e = (entries || []).find(x => x.tag === tag);
-  if (!e) return -1;
-  const r = (await Promise.all(e.hosts.map(tcpPing))).filter(x => x >= 0);
-  log('ping', `${tag}: ${r.length ? Math.min(...r) + ' мс' : 'нет ответа'} (${r.length}/${e.hosts.length} узлов)`);
-  return r.length ? Math.min(...r) : -1;
+async function pingOne(e) { if (e.udp) return -2; const r = (await Promise.all(e.hosts.map(tcpPing))).filter(x => x >= 0); return r.length ? Math.min(...r) : -1; }
+async function pingMany(tags) {
+  const res = {};
+  await Promise.all(tags.map(async t => { const e = (entries || []).find(x => x.tag === t); res[t] = e ? await pingOne(e) : -1; }));
+  log('ping', Object.entries(res).map(([t, v]) => `${t.replace(/[\u{1F1E6}-\u{1F1FF}]{2}\s*/gu, '')}: ${v === -2 ? 'UDP' : v < 0 ? '—' : v + ' мс'}`).join(', '));
+  return res;
+}
+function logAdapters(tag) { // виден ли TUN-адаптер
+  execFile('netsh', ['interface', 'ipv4', 'show', 'interfaces'], { windowsHide: true, encoding: 'buffer' }, (err, out) => {
+    if (err) return log(tag, 'netsh: ' + err.message);
+    out.toString('latin1').split(/\r?\n/).map(x => x.trim()).filter(Boolean).slice(0, 18).forEach(l => log(tag, 'iface: ' + l));
+  });
 }
 
 // ---------- процессы: Xray (ядро) + sing-box (TUN) ----------
@@ -390,7 +427,7 @@ async function startSingbox(level) {
     await sleep(400);
     if (sb !== p) throw new Error('sing-box остановился: ' + (p.failed || p.tail() || 'нет вывода'));
   }
-  log('sing-box', 'TUN запущен');
+  log('sing-box', 'TUN запущен'); logAdapters('tun');
 }
 async function stopAll(reason) {
   stopping = true;
@@ -414,12 +451,12 @@ async function connect(o = {}) {
   log('app', `=== подключение: сервер «${o.server || '—'}», логи: ${lastLevel} ===`);
   try {
     checkBins();
-    const ents = await loadEntries(true);
+    const ents = await loadEntries(true, true);
     const entry = ents.find(e => e.tag === o.server) || ents[0];
     curTag = entry.tag;
     await startXray(entry, lastLevel);
     await startSingbox(lastLevel);
-    log('app', 'подключено'); afterConnectTest().catch(() => {});
+    log('app', 'подключено'); afterConnectTest().catch(() => {}); setTimeout(refreshBg, 6000);
     return true;
   } catch (e) { log('app', 'ОШИБКА подключения: ' + e.message); await stopAll('ошибка'); throw e; }
 }
@@ -444,6 +481,7 @@ async function diag() {
     catch (e) { log('diag', `${n}: ОШИБКА ${why(e)}`); }
   }
   for (const h of ['1.1.1.1', ...((entries && entries[0] && entries[0].hosts.slice(0, 2).map(x => x.host)) || [])]) log('diag', `TCP ${h}:443 → ${await tcpPing({ host: h, port: 443 })} мс`);
+  logAdapters('diag'); await sleep(800);
   log('diag', '=== конец ===');
   return true;
 }
@@ -458,9 +496,9 @@ h('logout', async () => { await stopAll('выход'); try { await authed('/cabi
 h('sub', getSub);
 h('connect', connect);
 h('disconnect', () => stopAll('по кнопке'));
-h('status', async () => { const e = lastFail; lastFail = ''; return { running: !!(xray && sb), error: e }; });
+h('status', async () => { const e = lastFail; lastFail = ''; return { running: !!(xray && sb), error: e, ea: entriesAt, stale }; });
 h('servers', servers);
-h('ping', ping);
+h('pingmany', pingMany);
 h('pick', pick);
 h('devices', devices);
 h('deldevice', delDevice);
@@ -485,7 +523,7 @@ h('diag', diag);
 
 if (!app.requestSingleInstanceLock()) app.quit();
 app.whenReady().then(() => {
-  load(); proxyOffSync(); killOrphans();
+  load(); loadDisk(); proxyOffSync(); killOrphans();
   log('app', `запуск ${app.getName()} ${app.getVersion()}, Windows ${os.release()}, bin: ${binDir()}`);
   win = new BrowserWindow({
     width: 440, height: 800, resizable: false, autoHideMenuBar: true, backgroundColor: '#0b0f1a',
