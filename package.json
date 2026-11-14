@@ -1,7 +1,7 @@
 {
   "name": "mikaela-vpn",
   "productName": "Mikaela VPN",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Mikaela VPN client (sing-box)",
   "main": "main.js",
   "scripts": {
@@ -22,7 +22,8 @@
       "flags.js",
       "fonts.css",
       "logo.png",
-      "build/icon.png"
+      "icon.png",
+      "icon.ico"
     ],
     "extraResources": [
       {
@@ -36,14 +37,22 @@
         "portable"
       ],
       "requestedExecutionLevel": "requireAdministrator",
-      "icon": "build/icon.ico"
+      "icon": "icon.ico"
     },
     "nsis": {
       "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
-      "installerIcon": "build/icon.ico",
-      "uninstallerIcon": "build/icon.ico",
-      "installerHeaderIcon": "build/icon.ico"
-    }
+      "allowToChangeInstallationDirectory": true
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "tneange1",
+        "repo": "Mikaela-VPN-Client",
+        "releaseType": "release"
+      }
+    ]
+  },
+  "dependencies": {
+    "electron-updater": "^6.3.9"
   }
 }
