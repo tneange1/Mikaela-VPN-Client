@@ -19,7 +19,9 @@
       "main.js",
       "preload.js",
       "index.html",
-      "flags.js"
+      "flags.js",
+      "fonts.css",
+      "logo.png"
     ],
     "extraResources": [
       {
