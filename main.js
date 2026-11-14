@@ -23,24 +23,31 @@ const binDir = () => app.isPackaged ? path.join(process.resourcesPath, 'bin') : 
 const logDir = () => path.join(app.getPath('userData'), 'logs');
 
 // ---------- логи ----------
-const logBuf = [], pend = [];
+const logBuf = { x: [], c: [] }, pend = { x: [], c: [] };
+const LOGF = { x: 'xray.log', c: 'cabinet.log' };
+const CAB_TAGS = /^(sub|auth|api|renew|dev|bal|update|discord)$/;
 const mask = s => String(s).replace(/\x1b\[[0-9;]*m/g, '').replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, m => m.slice(0, 8) + '…');
 function log(tag, msg) {
   const t = new Date(), p = (n, l = 2) => String(n).padStart(l, '0');
   const line = `${p(t.getHours())}:${p(t.getMinutes())}:${p(t.getSeconds())}.${p(t.getMilliseconds(), 3)} [${tag}] ${mask(msg)}`;
-  logBuf.push(line); if (logBuf.length > 3000) logBuf.splice(0, logBuf.length - 3000);
-  pend.push(line);
+  const k = CAB_TAGS.test(tag) ? 'c' : 'x';
+  logBuf[k].push(line); if (logBuf[k].length > 1500) logBuf[k].splice(0, logBuf[k].length - 1500);
+  pend[k].push(line);
 }
+function flushLogs() {
+  for (const k of ['x', 'c']) {
+    if (!pend[k].length) continue;
+    const txt = pend[k].splice(0).join('\n') + '\n';
+    try { fs.mkdirSync(logDir(), { recursive: true }); fs.appendFileSync(path.join(logDir(), LOGF[k]), txt); } catch {}
+  }
+}
+setInterval(flushLogs, 700);
+// автоочистка раз в 3 минуты: память и файлы
 setInterval(() => {
-  if (!pend.length) return;
-  const txt = pend.splice(0).join('\n') + '\n';
-  try {
-    fs.mkdirSync(logDir(), { recursive: true });
-    const f = path.join(logDir(), 'app.log');
-    try { if (fs.statSync(f).size > 2e6) fs.renameSync(f, path.join(logDir(), 'app.old.log')); } catch {}
-    fs.appendFileSync(f, txt);
-  } catch {}
-}, 700);
+  flushLogs();
+  for (const k of ['x', 'c']) { logBuf[k].length = 0; try { fs.rmSync(path.join(logDir(), LOGF[k]), { force: true }); } catch {} }
+  try { fs.rmSync(path.join(logDir(), 'app.log'), { force: true }); fs.rmSync(path.join(logDir(), 'app.old.log'), { force: true }); } catch {}
+}, 180000);
 const rl = new Map(); // key -> {n, t0, supp, tag}
 function logRL(tag, msg) { // выводы xray/sing-box: убираем шум и схлопываем повторы
   if (/found process path|connection (upload|download) (finished|closed)/i.test(msg)) return;
@@ -149,6 +156,7 @@ async function jcall(p, method = 'GET', body) {
   const r = await authed(p, { method, headers: body ? J : undefined, body: body ? JSON.stringify(body) : undefined });
   const d = await r.json().catch(() => ({}));
   if (!r.ok) { log('api', `${method} ${p} → ${r.status}: ${errText(d, '')}`); throw new Error(errText(d, 'Ошибка ' + r.status)); }
+  log('api', `${method} ${p} → ${r.status}`);
   return d;
 }
 
@@ -242,6 +250,9 @@ async function devices() {
 }
 const resetDevices = () => jcall('/cabinet/subscription/devices' + sq(), 'DELETE');
 const delDevice = h => jcall('/cabinet/subscription/devices/' + encodeURIComponent(h) + sq(), 'DELETE');
+const sq2 = () => curSub ? '&subscription_id=' + encodeURIComponent(curSub) : '';
+const devicePrice = async n => { const d = await jcall('/cabinet/subscription/devices/price?devices=' + (+n || 1) + sq2()); log('dev', 'цена устройств: ' + String(JSON.stringify(d)).slice(0, 500)); return d; };
+const deviceBuy = async n => { const d = await jcall('/cabinet/subscription/devices/purchase' + sq(), 'POST', { devices: +n || 1 }); log('dev', 'докупка устройств: ' + String(JSON.stringify(d)).slice(0, 300)); return d; };
 const methods = () => jcall('/cabinet/balance/payment-methods');
 async function topup(o) {
   const d = await jcall('/cabinet/balance/topup', 'POST', { amount_kopeks: o.amount_kopeks, payment_method: o.payment_method, payment_option: o.payment_option || undefined });
@@ -698,6 +709,8 @@ h('servers', servers);
 h('pingmany', pingMany);
 h('pick', serial(pick));
 h('devices', devices);
+h('deviceprice', devicePrice);
+h('devicebuy', deviceBuy);
 h('deldevice', delDevice);
 h('resetdevices', resetDevices);
 h('hwid', async () => hwid());
@@ -716,9 +729,10 @@ h('subs', listSubs);
 h('setsub', setSub);
 h('setrpc', async en => { setRpc(!!en); return true; });
 h('rpcinfo', async () => ({ configured: !!RPC.clientId, connected: rpcReady }));
-h('logs', async () => logBuf.slice(-700).join('\n'));
-h('copylogs', async () => { clipboard.writeText(logBuf.join('\n')); return true; });
-h('clearlogs', async () => { logBuf.length = 0; pend.length = 0; try { fs.rmSync(logDir(), { recursive: true, force: true }); } catch {} return true; });
+const lk = k => (k === 'c' ? 'c' : 'x');
+h('logs', async k => logBuf[lk(k)].slice(-500).join('\n') || 'Пока пусто (автоочистка каждые 3 минуты)');
+h('copylogs', async k => { clipboard.writeText(logBuf[lk(k)].join('\n')); return true; });
+h('clearlogs', async k => { k = lk(k); logBuf[k].length = 0; pend[k].length = 0; try { fs.rmSync(path.join(logDir(), LOGF[k]), { force: true }); } catch {} return true; });
 h('openlogs', async () => { fs.mkdirSync(logDir(), { recursive: true }); return shell.openPath(logDir()); });
 h('diag', diag);
 
