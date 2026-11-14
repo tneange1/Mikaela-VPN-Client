@@ -738,6 +738,33 @@ h('diag', diag);
 
 if (!app.requestSingleInstanceLock()) app.quit();
 
+// ---- автозапуск (планировщик задач: запуск с правами администратора без UAC) ----
+const TASK = 'MikaelaVPN';
+const taskXml = (exe, hidden) => `<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <Triggers><LogonTrigger><Enabled>true</Enabled><Delay>PT10S</Delay></LogonTrigger></Triggers>
+  <Principals><Principal id="A"><LogonType>InteractiveToken</LogonType><RunLevel>HighestAvailable</RunLevel></Principal></Principals>
+  <Settings><MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy><DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries><StopIfGoingOnBatteries>false</StopIfGoingOnBatteries><ExecutionTimeLimit>PT0S</ExecutionTimeLimit><Enabled>true</Enabled></Settings>
+  <Actions Context="A"><Exec><Command>${exe.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</Command>${hidden ? '<Arguments>--hidden</Arguments>' : ''}</Exec></Actions>
+</Task>`;
+function autoGet() {
+  try { const x = execFileSync('schtasks', ['/Query', '/TN', TASK, '/XML'], { windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] }).toString('utf8'); return { on: true, min: /--hidden/.test(x) }; }
+  catch { return { on: false, min: false }; }
+}
+function autoSet(on, min) {
+  if (!app.isPackaged) throw new Error('Автозапуск доступен только в установленной версии');
+  if (!on) { try { execFileSync('schtasks', ['/Delete', '/TN', TASK, '/F'], { windowsHide: true, stdio: 'ignore' }); } catch {} log('app', 'автозапуск выключен'); return autoGet(); }
+  const f = path.join(app.getPath('temp'), 'mikaela-task.xml');
+  fs.writeFileSync(f, Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(taskXml(process.execPath, !!min), 'utf16le')]));
+  try { execFileSync('schtasks', ['/Create', '/TN', TASK, '/XML', f, '/F'], { windowsHide: true, stdio: 'pipe' }); }
+  catch (e) { throw new Error('Не удалось создать задачу: ' + String((e.stderr || e.message)).slice(0, 160)); }
+  finally { try { fs.unlinkSync(f); } catch {} }
+  log('app', `автозапуск включён${min ? ' (свёрнутым)' : ''}`); return autoGet();
+}
+h('autoget', async () => ({ ...autoGet(), packaged: app.isPackaged }));
+h('autoset', async (on, min) => autoSet(on, min));
+const START_HIDDEN = process.argv.includes('--hidden');
+
 // ---- автообновление клиента (electron-updater, GitHub Releases) ----
 let updater = null, upd = { state: 'idle', version: '', percent: 0, error: '' };
 function initUpdater() {
@@ -758,16 +785,17 @@ function initUpdater() {
 }
 h('updinfo', async () => ({ ...upd, current: app.getVersion(), enabled: !!updater }));
 h('updcheck', async () => { if (updater) { try { await updater.checkForUpdates(); } catch {} } return { ...upd, current: app.getVersion(), enabled: !!updater }; });
-h('updinstall', async () => { if (updater && upd.state === 'ready') { try { if (sb) sb.kill(); if (xray) xray.kill(); } catch {} updater.quitAndInstall(false, true); } return {}; });
+h('updinstall', async () => { if (updater && upd.state === 'ready') { try { if (sb) sb.kill(); if (xray) xray.kill(); } catch {} updater.quitAndInstall(true, true); } return {}; });
 
 app.whenReady().then(() => {
   load(); loadDisk(); proxyOffSync(); killOrphans();
   log('app', `запуск ${app.getName()} ${app.getVersion()}, Windows ${os.release()}, bin: ${binDir()}`);
   win = new BrowserWindow({
-    width: 440, height: 820, resizable: false, autoHideMenuBar: true, backgroundColor: '#111111',
+    width: 440, height: 820, show: !START_HIDDEN, resizable: false, autoHideMenuBar: true, backgroundColor: '#111111',
     icon: path.join(__dirname,'icon.png'), title: 'Mikaela VPN', webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true },
   });
   win.loadFile('index.html');
+  if (START_HIDDEN) win.once('ready-to-show', () => { win.showInactive(); win.minimize(); });
   initUpdater();
 });
 app.on('before-quit', () => { try { if (rpcSock) rpcSock.destroy(); } catch {} for (const p of [sb, xray]) { try { if (p) p.kill(); } catch {} } });
