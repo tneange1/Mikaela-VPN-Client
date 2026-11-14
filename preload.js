@@ -9,7 +9,7 @@ contextBridge.exposeInMainWorld('vpn', {
   devices: () => call('devices'), delDevice: (h) => call('deldevice', h), resetDevices: () => call('resetdevices'),
   methods: () => call('methods'), topup: (o) => call('topup', o),
   renewOptions: () => call('renewoptions'), renew: (d) => call('renew', d),
-  logs: () => call('logs'), copyLogs: () => call('copylogs'), clearLogs: () => call('clearlogs'), openLogs: () => call('openlogs'), diag: () => call('diag'),
+  logs: (k) => call('logs', k), copyLogs: (k) => call('copylogs', k), clearLogs: (k) => call('clearlogs', k), devicePrice: (n) => call('deviceprice', n), deviceBuy: (n) => call('devicebuy', n), openLogs: () => call('openlogs'), diag: () => call('diag'),
   subs: () => call('subs'), setSub: (id) => call('setsub', id), setRpc: (e) => call('setrpc', e), rpcInfo: () => call('rpcinfo'),
   updInfo: () => call('updinfo'), updCheck: () => call('updcheck'), updInstall: () => call('updinstall'),
   openCabinet: () => call('cabinet'),
