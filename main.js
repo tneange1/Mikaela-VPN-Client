@@ -194,7 +194,7 @@ function webLogin() {
   return new Promise(async (resolve, reject) => {
     const part = 'persist:cabinet-login';
     await ses.fromPartition(part).clearStorageData();
-    const w = new BrowserWindow({ icon: path.join(__dirname,'build','icon.png'), width: 520, height: 780, parent: win, modal: true, autoHideMenuBar: true, title: 'Вход через кабинет', webPreferences: { partition: part } });
+    const w = new BrowserWindow({ icon: path.join(__dirname,'icon.png'), width: 520, height: 780, parent: win, modal: true, autoHideMenuBar: true, title: 'Вход через кабинет', webPreferences: { partition: part } });
     w.webContents.setUserAgent(w.webContents.getUserAgent().replace(/\s(Electron|mikaela-vpn)\/\S+/gi, ''));
     let done = false;
     const t = setInterval(async () => {
@@ -723,14 +723,38 @@ h('openlogs', async () => { fs.mkdirSync(logDir(), { recursive: true }); return 
 h('diag', diag);
 
 if (!app.requestSingleInstanceLock()) app.quit();
+
+// ---- автообновление клиента (electron-updater, GitHub Releases) ----
+let updater = null, upd = { state: 'idle', version: '', percent: 0, error: '' };
+function initUpdater() {
+  if (!app.isPackaged || process.env.PORTABLE_EXECUTABLE_DIR) { upd.state = 'off'; return; }
+  try {
+    updater = require('electron-updater').autoUpdater;
+    updater.autoDownload = true; updater.autoInstallOnAppQuit = true;
+    updater.logger = { info: m => log('update', String(m)), warn: m => log('update', String(m)), error: m => log('update', String(m)), debug() {} };
+    updater.on('checking-for-update', () => { upd.state = 'checking'; });
+    updater.on('update-available', i => { upd = { state: 'downloading', version: i.version, percent: 0, error: '' }; });
+    updater.on('update-not-available', () => { upd.state = 'latest'; });
+    updater.on('download-progress', p => { upd.state = 'downloading'; upd.percent = Math.round(p.percent); });
+    updater.on('update-downloaded', i => { upd = { state: 'ready', version: i.version, percent: 100, error: '' }; });
+    updater.on('error', e => { upd.state = 'error'; upd.error = String(e && e.message || e).slice(0, 200); });
+    const chk = () => updater.checkForUpdates().catch(() => {});
+    setTimeout(chk, 8000); setInterval(chk, 3600000);
+  } catch (e) { upd.state = 'off'; log('update', 'не запущено: ' + e.message); }
+}
+h('updinfo', async () => ({ ...upd, current: app.getVersion(), enabled: !!updater }));
+h('updcheck', async () => { if (updater) { try { await updater.checkForUpdates(); } catch {} } return { ...upd, current: app.getVersion(), enabled: !!updater }; });
+h('updinstall', async () => { if (updater && upd.state === 'ready') { try { if (sb) sb.kill(); if (xray) xray.kill(); } catch {} updater.quitAndInstall(false, true); } return {}; });
+
 app.whenReady().then(() => {
   load(); loadDisk(); proxyOffSync(); killOrphans();
   log('app', `запуск ${app.getName()} ${app.getVersion()}, Windows ${os.release()}, bin: ${binDir()}`);
   win = new BrowserWindow({
     width: 440, height: 820, resizable: false, autoHideMenuBar: true, backgroundColor: '#111111',
-    title: 'Mikaela VPN', webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true },
+    icon: path.join(__dirname,'icon.png'), title: 'Mikaela VPN', webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true },
   });
   win.loadFile('index.html');
+  initUpdater();
 });
 app.on('before-quit', () => { try { if (rpcSock) rpcSock.destroy(); } catch {} for (const p of [sb, xray]) { try { if (p) p.kill(); } catch {} } });
 app.on('window-all-closed', () => app.quit());
