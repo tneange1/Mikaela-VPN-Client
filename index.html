@@ -62,6 +62,20 @@ nav button.act{color:var(--tx)}
 #toast.show{opacity:1;transform:none}
 .pill{display:flex;align-items:center;gap:10px;padding:7px 14px;border-radius:99px;background:var(--sf);border:1px solid var(--bd);color:var(--tx);font:inherit;font-size:13px;font-weight:500;cursor:pointer}
 .pill svg{width:13px;height:13px}.pill:hover{background:var(--sh)}
+
+*:focus,*:focus-visible{outline:none!important}button,select,input,textarea,a{-webkit-tap-highlight-color:transparent}
+.seg{display:flex;margin-top:12px;padding:3px;gap:2px;border:1px solid var(--bd);border-radius:12px;background:var(--sf)}
+.seg button{flex:1;border:0;background:none;color:var(--t2);padding:9px 4px;border-radius:9px;font:inherit;font-size:13px;cursor:pointer;transition:background .18s,color .18s}
+.seg button:hover{color:var(--tx)}.seg button.act{background:var(--sh);color:var(--tx);box-shadow:0 0 0 1px var(--bh) inset}
+#dlg{position:absolute;inset:0;background:#000b;display:flex;align-items:center;justify-content:center;z-index:50;padding:24px}
+#dlg .box{width:100%;border-radius:18px;padding:22px;background:var(--bg);border:1px solid var(--bd)}
+#dlg .tt{font-size:17px;margin:0 0 8px}#dlg .tx{font-size:14px;color:var(--t2);line-height:1.5;white-space:pre-wrap}
+#dlg .g2 .btn{justify-content:center}#dlg .btn.pri{background:var(--tx);color:var(--bg);border-color:var(--tx)}#dlg .btn.pri.dng{background:var(--er);border-color:var(--er);color:#fff}
+.stp{display:flex;align-items:center;justify-content:center;gap:22px;margin:22px 0 8px}
+.stp button{width:44px;height:44px;border-radius:12px;border:1px solid var(--bd);background:var(--sf);color:var(--tx);font:inherit;font-size:20px;cursor:pointer}
+.stp button:hover{background:var(--sh)}.stp button:disabled{opacity:.4;cursor:default}
+.stp .num{font-size:40px;font-weight:300;min-width:56px;text-align:center}
+.ctr{text-align:center}
 </style></head><body>
 
 <div id="login" class="screen">
@@ -118,6 +132,7 @@ nav button.act{color:var(--tx)}
     <p class="sub" id="devSub" style="display:block">—</p>
     <div class="list" id="devList"></div>
     <div id="devErr" class="er"></div>
+    <button class="btn" id="devBuy"><span data-ic="plus"></span>Докупить устройства</button>
     <button class="btn dng" id="devReset"><span data-ic="trash"></span>Сбросить все устройства</button>
   </section>
 
@@ -125,12 +140,13 @@ nav button.act{color:var(--tx)}
     <h1 class="h1">Настройки</h1>
     <p class="sub" style="display:block">Параметры приложения и журнал xray</p>
     <div class="sec"><div class="hdr">Тема</div>
-      <div class="g2" id="themes"><button class="btn c" data-t="system">Как в системе</button><button class="btn c" data-t="light">Белая</button><button class="btn c" data-t="gray">Серая</button><button class="btn c" data-t="dark">Чёрная</button></div></div>
+      <div class="seg" id="themes"><button data-t="system">Система</button><button data-t="light">Белая</button><button data-t="gray">Серая</button><button data-t="dark">Чёрная</button></div></div>
     <div class="sec"><div class="hdr">Автообновление серверов<select id="autoSel" class="s"><option value="60000">каждую минуту</option><option value="300000">каждые 5 минут</option><option value="3600000">раз в час</option></select></div>
       <div class="meta">Новые хосты из панели появятся в списке без перезапуска</div></div>
     <div class="sec"><div class="hdr">Версия <span id="verTxt" class="meta" style="margin:0"></span><button class="btn sm" id="updBtn" style="width:auto;padding:6px 14px">Проверить</button></div><div class="meta" id="updHint"></div></div>
     <div class="sec"><div class="hdr">Показывать в Discord<button class="btn sm" id="rpcSw" style="width:auto;padding:6px 14px"></button></div><div class="meta" id="rpcHint"></div></div>
     <div class="sec"><div class="hdr">Логи<select id="logLevel" class="s"><option value="warning">Обычные</option><option value="info">Подробные</option><option value="debug">Отладка</option></select></div>
+      <div class="seg" id="logTabs"><button data-lg="x" class="act">Xray</button><button data-lg="c">Подписка и кабинет</button></div>
       <textarea id="logBox" readonly spellcheck="false"></textarea>
       <div class="g3"><button class="btn sm" id="logRef">Обновить</button><button class="btn sm" id="logCopy">Копировать</button><button class="btn sm" id="logDiag">Диагностика</button></div>
       <div class="g2"><button class="btn sm" id="logClr">Очистить</button><button class="btn sm" id="logDir">Папка логов</button></div></div>
@@ -144,6 +160,7 @@ nav button.act{color:var(--tx)}
     <button data-p="pDev"><span data-ic="pc"></span>Устройства</button>
     <button data-p="pSet"><span data-ic="sliders"></span>Настройки</button>
   </nav>
+  <div id="dlg" class="hide"><div class="box"><h3 class="tt" id="dlgT"></h3><div class="tx" id="dlgX"></div><div class="g2"><button class="btn" id="dlgN">Отмена</button><button class="btn pri" id="dlgY">OK</button></div></div></div>
   <div id="sheet" class="hide"><div class="sheet"><div id="sheetBody"></div><button class="btn c" id="sheetClose" style="margin-top:18px">Закрыть</button></div></div>
 </div>
 
@@ -199,6 +216,8 @@ $('out').onclick=async()=>{await vpn.logout();S.list=[];S.sub=null;S.dev=null;S.
 function go(p){['pHome','pSrv','pDev','pSet'].forEach(x=>$(x).classList.toggle('hide',x!==p));document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('act',b.dataset.p===p));
   $('main')&&0;document.querySelector('main').scrollTop=0;if(p==='pSrv'&&!S.list.length)loadServers(false);if(p==='pDev')loadDevices();if(p==='pSet'){loadLogs();renderRpc()}}
 document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>go(b.dataset.p));$('curSrv').onclick=()=>go('pSrv');$('brand').onclick=()=>go('pHome');
+function ask(text,ok,title){return new Promise(res=>{$('dlgT').textContent=title||'Подтверждение';$('dlgX').textContent=text;$('dlgY').textContent=ok||'Да';$('dlg').classList.remove('hide');
+  const f=v=>{$('dlg').classList.add('hide');$('dlgY').onclick=$('dlgN').onclick=null;res(v)};$('dlgY').onclick=()=>f(true);$('dlgN').onclick=()=>f(false)})}
 function sheet(h){$('sheetBody').innerHTML=h;$('sheet').classList.remove('hide')}
 function closeSheet(){$('sheet').classList.add('hide');if(watch){clearInterval(watch);watch=null}}
 $('sheetClose').onclick=closeSheet;
@@ -261,10 +280,40 @@ window.addEventListener('focus',()=>{if(!$('app').classList.contains('hide')&&Da
 async function loadDevices(){$('devErr').textContent='';const r=await vpn.devices();if(!r.ok)return $('devErr').textContent=r.error;S.dev=r.data;if(S.dev.limit==null&&S.sub)S.dev.limit=S.sub.device_limit;renderDevices();renderInfo()}
 function renderDevices(){const d=S.dev;if(!d)return;$('devSub').textContent=`Подключено ${d.count} из ${d.limit||'∞'} устройств`;
   $('devList').innerHTML=d.list.map(x=>`<div class="dev">${/android|ios|iphone|phone/i.test(x.platform||'')?IC.phone:IC.pc}<div class="grow"><div class="n">${esc(x.model||x.platform||'Устройство')}${x.self?'<span class="tag">это устройство</span>':''}</div><div class="s">${esc(x.platform)}${x.platform?' · ':''}${esc(x.hwid.slice(0,10))}…</div></div><button class="btn sm dng" style="width:auto;padding:8px 14px" data-h="${esc(x.hwid)}" data-s="${x.self?1:0}">Удалить</button></div>`).join('')||'<div class="t2" style="padding:12px 0">Нет подключённых устройств</div>';
-  document.querySelectorAll('[data-h]').forEach(b=>b.onclick=async()=>{if(!confirm(b.dataset.s==='1'?'Это текущее устройство. Удалить его из аккаунта? Оно привяжется заново при следующем обновлении подписки.':'Удалить это устройство из бота и панели?'))return;
+  document.querySelectorAll('[data-h]').forEach(b=>b.onclick=async()=>{if(!await ask(b.dataset.s==='1'?'Это текущее устройство. Удалить его из аккаунта? Оно привяжется заново при следующем обновлении подписки.':'Удалить это устройство из бота и панели?'))return;
     const r=await vpn.delDevice(b.dataset.h);if(!r.ok)return $('devErr').textContent=r.error;toast('Устройство удалено','var(--er)');loadDevices()})}
-$('devReset').onclick=async()=>{if(!confirm('Удалить ВСЕ устройства из аккаунта? Текущее привяжется заново при следующем обновлении подписки.'))return;const r=await vpn.resetDevices();if(!r.ok)return $('devErr').textContent=r.error;toast('Устройства сброшены','var(--er)');loadDevices()};
+$('devReset').onclick=async()=>{if(!await ask('Удалить ВСЕ устройства из аккаунта? Текущее привяжется заново при следующем обновлении подписки.'))return;const r=await vpn.resetDevices();if(!r.ok)return $('devErr').textContent=r.error;toast('Устройства сброшены','var(--er)');loadDevices()};
 
+
+/* докупка устройств */
+const num=(...v)=>{for(const x of v)if(x!=null&&x!==''&&!isNaN(+x))return +x;return null};
+async function openDevBuy(){sheet('<h2>Докупить устройства</h2><div class="t2">Загружаю данные из кабинета…</div>');
+  const lim0=S.dev&&S.dev.limit!=null?S.dev.limit:(S.sub&&S.sub.device_limit);
+  let n=1,info={},busy=0;
+  const load=async()=>{const t=++busy;const r=await vpn.devicePrice(n);if(t!==busy)return;if(!r.ok){info={err:r.error};return}info=r.data||{}};
+  const view=()=>{const cur=num(info.current_device_limit,info.current_limit,lim0),mx=num(info.max_device_limit,info.max_devices,info.device_limit_max);
+    let can=num(info.max_can_add,info.max_addable,info.can_add_max,info.max_to_add);if(can==null&&mx!=null&&cur!=null)can=mx-cur;
+    const per=num(info.price_per_device_kopeks,info.per_device_price_kopeks,info.device_price_kopeks);
+    const tot=num(info.total_price_kopeks,info.price_kopeks,info.final_price_kopeks,per!=null?per*n:null);
+    const days=num(info.days_left,info.days,info.remaining_days),bal=S.user&&S.user.balance_kopeks!=null?S.user.balance_kopeks:null;
+    const blocked=info.err||info.available===false||info.can_add===false||(can!=null&&can<1);
+    sheet(`<h2>Докупить устройства</h2><div class="t2" style="font-size:14px">${esc((S.sub&&S.sub.tariff_name)||'Подписка')} · баланс: ${bal!=null?rub(bal):'—'}</div>
+    <div class="stp"><button id="dm" ${n<=1?'disabled':''}>−</button><div class="num">${n}</div><button id="dp" ${can!=null&&n>=can?'disabled':''}>+</button></div>
+    <div class="ctr t2" style="font-size:13px">Текущий лимит: ${cur!=null?cur:'—'}${mx!=null?' / максимум '+mx:''}${can!=null?' · можно добавить: '+can:''}</div>
+    ${per!=null?`<div class="ctr t2" style="font-size:13px;margin-top:6px">${rub(per)} за устройство${days!=null?' ('+days+' дн.)':''}</div>`:''}
+    ${tot!=null?`<div class="ctr" style="font-size:24px;margin-top:10px">${rub(tot)}</div>`:''}
+    ${info.err?`<div class="er ctr">${esc(info.err)}</div>`:blocked?'<div class="er ctr">Докупка недоступна для этого тарифа</div>':''}
+    <div id="rm" class="ctr" style="margin-top:10px;font-size:13px"></div>
+    <button class="btn c" id="dbuy" ${blocked?'disabled':''} style="margin-top:14px">Купить с баланса</button>`);
+    const re=async d=>{n=Math.max(1,n+d);view();await load();view()};
+    if($('dm'))$('dm').onclick=()=>re(-1);if($('dp'))$('dp').onclick=()=>re(1);
+    if($('dbuy'))$('dbuy').onclick=async()=>{const rm=(t,ok)=>{$('rm').className=ok?'ok ctr':'er ctr';$('rm').textContent=t};
+      if(tot!=null&&bal!=null&&tot>bal)return rm(`Не хватает ${rub(tot-bal)}. Пополните баланс кнопкой вверху.`);
+      if(!await ask(`Добавить ${n} устр.${tot!=null?' за '+rub(tot):''}? Деньги спишутся с баланса.`,'Купить'))return;
+      $('dbuy').disabled=true;const q=await vpn.deviceBuy(n);if(!q.ok){$('dbuy').disabled=false;return rm(q.error)}
+      closeSheet();toast('Лимит устройств увеличен на '+n);const m=await vpn.me();if(m.ok&&m.data)setUser(m.data);refreshSub()}};
+  await load();view()}
+$('devBuy').onclick=openDevBuy;
 /* баланс */
 $('balBtn').onclick=openTopup;
 async function openTopup(){sheet('<h2>Пополнение баланса</h2><div class="t2">Загружаю способы оплаты…</div>');const r=await vpn.methods();
@@ -306,7 +355,7 @@ $('renewBtn').onclick=async()=>{sheet('<h2>Продление подписки</
   sheet(`<h2>Продление подписки</h2><div class="t2" style="font-size:14px">${esc((S.sub&&S.sub.tariff_name)||'Подписка')} · оплата с баланса: ${bal()!=null?rub(bal()):'—'}</div>${list.map((x,i)=>`<button class="btn between" data-i="${i}"><span>${esc(x.label||x.days+' дн.')}${x.disc?` <span class="t2">−${esc(x.disc)}%</span>`:''}</span><span class="t2">${x.price!=null?rub(x.price):esc(x.text)}</span></button>`).join('')}<div id="rm" style="margin-top:12px;font-size:13px"></div>`);
   document.querySelectorAll('[data-i]').forEach(b=>b.onclick=async()=>{const x=list[+b.dataset.i],rm=(t,ok)=>{$('rm').className=ok?'ok':'er';$('rm').textContent=t};
     if(x.price!=null&&bal()!=null&&x.price>bal())return rm(`Не хватает ${rub(x.price-bal())}. Пополните баланс кнопкой вверху.`);
-    if(!confirm(`Продлить на ${x.days} дн.${x.price!=null?' за '+rub(x.price):''}? Деньги спишутся с баланса.`))return;
+    if(!await ask(`Продлить на ${x.days} дн.${x.price!=null?' за '+rub(x.price):''}? Деньги спишутся с баланса.`))return;
     const q=await vpn.renew(x.days);if(!q.ok)return rm(q.error+(/средств|balance|insufficient/i.test(q.error)?' — пополните баланс (кнопка вверху).':''));
     closeSheet();toast('Подписка продлена на '+x.days+' дн.');const m=await vpn.me();if(m.ok&&m.data)setUser(m.data);refreshSub()})};
 
@@ -330,9 +379,11 @@ async function renderRpc(){const r=await vpn.rpcInfo(),i=r.data||{};$('rpcSw').c
   $('rpcHint').textContent=!i.configured?'Не задан Discord Application ID (RPC.clientId в main.js)':!S.rpc?'Выключено':i.connected?'Discord подключён':'Ожидаю запуск Discord…'}
 $('rpcSw').onclick=async()=>{S.rpc=!S.rpc;ls.set('rpc',S.rpc?'1':'0');await vpn.setRpc(S.rpc);setTimeout(renderRpc,800);renderRpc()};
 $('logLevel').value=S.logLevel;$('logLevel').onchange=()=>{S.logLevel=$('logLevel').value;ls.set('logLevel',S.logLevel);toast('Уровень логов применится при следующем подключении','var(--t2)')};
-async function loadLogs(){const r=await vpn.logs();if(!r.ok)return;const b=$('logBox'),end=b.scrollTop+b.clientHeight>=b.scrollHeight-30;b.value=r.data;if(end)b.scrollTop=b.scrollHeight}
-$('logRef').onclick=loadLogs;$('logCopy').onclick=async()=>{await vpn.copyLogs();toast('Логи скопированы')};
-$('logClr').onclick=async()=>{await vpn.clearLogs();loadLogs();toast('Журнал очищен','var(--t2)')};$('logDir').onclick=()=>vpn.openLogs();
+let LK='x';
+document.querySelectorAll('[data-lg]').forEach(b=>b.onclick=()=>{LK=b.dataset.lg;document.querySelectorAll('[data-lg]').forEach(x=>x.classList.toggle('act',x===b));$('logBox').value='';loadLogs()});
+async function loadLogs(){const r=await vpn.logs(LK);if(!r.ok)return;const b=$('logBox'),end=b.scrollTop+b.clientHeight>=b.scrollHeight-30;b.value=r.data;if(end)b.scrollTop=b.scrollHeight}
+$('logRef').onclick=loadLogs;$('logCopy').onclick=async()=>{await vpn.copyLogs(LK);toast('Лог скопирован')};
+$('logClr').onclick=async()=>{await vpn.clearLogs(LK);loadLogs();toast('Лог очищен','var(--t2)')};$('logDir').onclick=()=>vpn.openLogs();
 $('logDiag').onclick=async()=>{$('logDiag').disabled=true;await vpn.diag();$('logDiag').disabled=false;loadLogs();toast('Диагностика завершена')};
 setInterval(()=>{if(live()&&!$('pSet').classList.contains('hide'))loadLogs()},2000);
 init();
