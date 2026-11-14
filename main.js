@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, safeStorage, shell, session: ses, net: enet, clipboard } = require('electron');
+const { app, BrowserWindow, ipcMain, safeStorage, shell, session: ses, net: enet, clipboard, dialog } = require('electron');
 const path = require('path'), fs = require('fs'), net = require('net'), os = require('os'), crypto = require('crypto'), dns = require('dns');
 const { spawn, execFileSync, execFile } = require('child_process');
 
@@ -554,6 +554,7 @@ function happAdapter() {
   } catch { return ''; }
 }
 async function startSingbox(level) {
+  const RT = routeRules();
   const cfg = {
     log: { level: level === 'debug' ? 'debug' : level === 'info' ? 'info' : 'warn', timestamp: false },
     dns: { servers: [{ type: 'tcp', tag: 'dns-remote', server: '1.1.1.1', detour: 'xray' }], final: 'dns-remote', strategy: 'ipv4_only' },
@@ -565,8 +566,9 @@ async function startSingbox(level) {
         { process_name: ['xray.exe'], outbound: 'direct' },   // трафик самого Xray к серверам — мимо TUN
         { protocol: 'dns', action: 'hijack-dns' },
         { ip_is_private: true, outbound: 'direct' },
+        ...RT.rules,
       ],
-      final: 'xray', auto_detect_interface: true, find_process: true,
+      final: RT.final, auto_detect_interface: true, find_process: true,
     },
   };
   const f = path.join(app.getPath('userData'), 'singbox-config.json');
@@ -737,6 +739,62 @@ h('openlogs', async () => { fs.mkdirSync(logDir(), { recursive: true }); return 
 h('diag', diag);
 
 if (!app.requestSingleInstanceLock()) app.quit();
+
+// ---- способы входа (подтягиваются из кабинета) ----
+async function authOpts() {
+  const o = { email: true, reg: true, telegram: false, oauth: [] };
+  const get = async p => { try { const r = await raw(p); if (!r.ok) return null; return await r.json(); } catch { return null; } };
+  const [pr, tw, em] = await Promise.all([get('/cabinet/auth/oauth/providers'), get('/cabinet/branding/telegram-widget'), get('/cabinet/branding/email-auth')]);
+  log('auth', `способы входа: oauth=${JSON.stringify(pr)} telegram=${JSON.stringify(tw)} email=${JSON.stringify(em)}`.slice(0, 600));
+  if (pr && Array.isArray(pr.providers)) o.oauth = pr.providers.filter(x => x && x.name).map(x => ({ name: String(x.name), title: String(x.display_name || x.name) }));
+  if (tw && tw.enabled !== false && (tw.bot_username || tw.bot_name || tw.oidc_enabled || tw.oidc_client_id || tw.enabled === true)) o.telegram = true;
+  if (em) { const v = em.enabled ?? em.email_auth_enabled ?? em.email_enabled; if (typeof v === 'boolean') { o.email = v; o.reg = v; } }
+  return o;
+}
+h('authopts', authOpts);
+
+// ---- маршрутизация: приложения и домены ----
+const routeFile = () => path.join(app.getPath('userData'), 'routing.json');
+const ROUTE_DEF = { mode: 'bypass', apps: [], domains: [] };
+function routeLoad() {
+  try { const j = JSON.parse(fs.readFileSync(routeFile(), 'utf8')); return { mode: j.mode === 'only' ? 'only' : 'bypass', apps: Array.isArray(j.apps) ? j.apps : [], domains: Array.isArray(j.domains) ? j.domains : [] }; }
+  catch { return { ...ROUTE_DEF, apps: [], domains: [] }; }
+}
+const normDomain = s => String(s || '').trim().toLowerCase().replace(/^[a-z]+:\/\//, '').replace(/^\*?\./, '').split(/[\/:?#]/)[0];
+function routeSave(o) {
+  const apps = [], seen = new Set();
+  for (const a of (o.apps || [])) { const name = path.basename(String(a.name || a.path || '')).trim(); if (!/^[^\\/:*?"<>|]+\.exe$/i.test(name) || seen.has(name.toLowerCase())) continue; seen.add(name.toLowerCase()); apps.push({ name, path: a.path ? String(a.path) : '' }); }
+  const domains = [...new Set((o.domains || []).map(normDomain).filter(x => /^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$/.test(x) && x.includes('.')))];
+  const r = { mode: o.mode === 'only' ? 'only' : 'bypass', apps, domains };
+  fs.writeFileSync(routeFile(), JSON.stringify(r, null, 2)); log('app', `маршрутизация: режим ${r.mode}, приложений ${apps.length}, доменов ${domains.length}`);
+  return r;
+}
+function routeRules() {
+  const r = routeLoad(), rules = [];
+  const target = r.mode === 'only' ? 'xray' : 'direct';
+  const names = [...new Set(r.apps.flatMap(a => [a.name, a.name.toLowerCase()]))];
+  if (names.length) rules.push({ process_name: names, outbound: target });
+  if (r.domains.length) rules.push({ domain_suffix: r.domains, outbound: target });
+  const only = r.mode === 'only' && rules.length > 0;
+  if (r.mode === 'only' && !rules.length) log('app', 'режим «только список» пуст — используется обычная маршрутизация');
+  return { rules, final: only ? 'direct' : 'xray' };
+}
+h('routeget', async () => routeLoad());
+h('routeset', async o => routeSave(o || {}));
+h('pickexe', async () => {
+  const r = await dialog.showOpenDialog(win, { title: 'Выберите программу', properties: ['openFile'], filters: [{ name: 'Программы', extensions: ['exe'] }] });
+  if (r.canceled || !r.filePaths[0]) return null;
+  return { name: path.basename(r.filePaths[0]), path: r.filePaths[0] };
+});
+h('procs', () => new Promise(res => {
+  const ps = "[Console]::OutputEncoding=[Text.Encoding]::UTF8; Get-Process | Where-Object {$_.MainWindowTitle} | Select-Object @{n='name';e={$_.ProcessName+'.exe'}},@{n='path';e={$_.Path}},@{n='title';e={$_.MainWindowTitle}} | ConvertTo-Json -Compress";
+  execFile('powershell', ['-NoProfile', '-NonInteractive', '-Command', ps], { windowsHide: true, timeout: 10000, maxBuffer: 4e6 }, (err, out) => {
+    if (err) return res([]);
+    try { let a = JSON.parse(String(out).trim() || '[]'); if (!Array.isArray(a)) a = [a]; const seen = new Set();
+      res(a.filter(x => x && x.name && !/^(xray|sing-box|mikaela vpn|mikaela-vpn)\.exe$/i.test(x.name) && !seen.has(x.name.toLowerCase()) && seen.add(x.name.toLowerCase())).map(x => ({ name: x.name, path: x.path || '', title: String(x.title || '').slice(0, 60) })).sort((p, q) => p.name.localeCompare(q.name))); }
+    catch { res([]); }
+  });
+}));
 
 // ---- автозапуск (планировщик задач: запуск с правами администратора без UAC) ----
 const TASK = 'MikaelaVPN';
