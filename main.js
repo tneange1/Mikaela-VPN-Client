@@ -194,7 +194,7 @@ function webLogin() {
   return new Promise(async (resolve, reject) => {
     const part = 'persist:cabinet-login';
     await ses.fromPartition(part).clearStorageData();
-    const w = new BrowserWindow({ width: 520, height: 780, parent: win, modal: true, autoHideMenuBar: true, title: 'Вход через кабинет', webPreferences: { partition: part } });
+    const w = new BrowserWindow({ icon: path.join(__dirname,'build','icon.png'), width: 520, height: 780, parent: win, modal: true, autoHideMenuBar: true, title: 'Вход через кабинет', webPreferences: { partition: part } });
     w.webContents.setUserAgent(w.webContents.getUserAgent().replace(/\s(Electron|mikaela-vpn)\/\S+/gi, ''));
     let done = false;
     const t = setInterval(async () => {
@@ -248,7 +248,7 @@ async function topup(o) {
   if (d.payment_url && /^https:\/\//.test(d.payment_url)) shell.openExternal(d.payment_url);
   return d;
 }
-const renewOptions = () => jcall('/cabinet/subscription/renewal-options' + sq());
+const renewOptions = async () => { const d = await jcall('/cabinet/subscription/renewal-options' + sq()); log('renew', 'варианты продления: ' + String(JSON.stringify(d)).slice(0, 700)); return d; };
 const renew = days => jcall('/cabinet/subscription/renew' + sq(), 'POST', { period_days: days });
 
 const normSub = x => ({ id: String(x.id != null ? x.id : (x.subscription_id != null ? x.subscription_id : '')), name: x.tariff_name || x.name || (x.tariff && x.tariff.name) || 'Подписка', days: x.days_left != null ? x.days_left : null, status: x.status || '', trial: !!x.is_trial });
@@ -322,7 +322,7 @@ async function pullArr(url, fast) { // скачать Xray JSON с панели 
       const arr = Array.isArray(j) ? j : (j && Array.isArray(j.outbounds) ? [j] : null);
       if (!arr || !arr.length) { lastE = 'JSON без конфигов'; log('sub', lastE); continue; }
       const ents = buildEntries(arr);
-      if (ents.length) { log('sub', `серверов: ${ents.length}: ` + ents.map(e => e.tag + (e.auto ? ` [авто, ${e.count} узлов]` : '') + (e.udp ? ' [UDP]' : '')).join('; ')); log('sub', 'описания: ' + (ents.filter(e => e.desc).map(e => e.tag + ' → ' + e.desc).join('; ') || 'нет') + ' | meta: ' + JSON.stringify(arr[0] && arr[0].meta).slice(0, 160)); return arr; }
+      if (ents.length) { log('sub', `серверов: ${ents.length}: ` + ents.map(e => e.tag + (e.auto ? ` [авто, ${e.count} узлов]` : '') + (e.udp ? ' [UDP]' : '')).join('; ')); log('sub', 'описания: ' + (ents.filter(e => e.desc).map(e => e.tag + ' → ' + e.desc).join('; ') || 'нет') + ' | meta: ' + String(JSON.stringify(arr[0] && arr[0].meta)).slice(0, 160)); return arr; }
       lastE = ph ? 'панель вернула заглушку — вероятно, достигнут лимит устройств (удалите лишнее на вкладке «Устройства»)' : 'в ответе нет подходящих серверов';
       log('sub', lastE);
     } catch (e) { lastE = e.message; log('sub', 'ошибка: ' + e.message); }
