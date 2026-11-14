@@ -101,6 +101,7 @@ nav button.act{color:var(--tx)}
 
   <main>
   <section id="pHome">
+    <div id="updBar" class="hide"><div class="card" style="margin:0 0 18px;padding:14px 16px"><div class="grow"><div class="ct" id="ubT" style="font-size:14px"></div><div class="meta" id="ubS"></div></div><button class="btn sm" id="ubB" style="width:auto;padding:9px 16px;margin:0 0 0 12px">Обновить</button></div></div>
     <h1 class="h1">Главная</h1>
     <div class="sub"><i id="hDot" class="dot2"></i><span id="hTxt">Отключено</span></div>
     <div class="card"><div><div id="cT" class="ct">Соединение остановлено</div><div id="cS" class="mono t2" style="margin-top:4px">Нажмите для подключения</div></div>
@@ -143,7 +144,11 @@ nav button.act{color:var(--tx)}
       <div class="seg" id="themes"><button data-t="system">Система</button><button data-t="light">Белая</button><button data-t="gray">Серая</button><button data-t="dark">Чёрная</button></div></div>
     <div class="sec"><div class="hdr">Автообновление серверов<select id="autoSel" class="s"><option value="60000">каждую минуту</option><option value="300000">каждые 5 минут</option><option value="3600000">раз в час</option></select></div>
       <div class="meta">Новые хосты из панели появятся в списке без перезапуска</div></div>
-    <div class="sec"><div class="hdr">Версия <span id="verTxt" class="meta" style="margin:0"></span><button class="btn sm" id="updBtn" style="width:auto;padding:6px 14px">Проверить</button></div><div class="meta" id="updHint"></div></div>
+    <div class="sec"><div class="hdr">Версия <span id="verTxt" class="meta" style="margin:0"></span></div><div class="meta" id="updHint"></div></div>
+    <div class="sec"><div class="hdr">Автозапуск с Windows<button class="btn sm" id="asSw" style="width:auto;padding:6px 14px"></button></div>
+      <div class="hdr" style="margin-top:14px">Запускать свёрнутым<button class="btn sm" id="amSw" style="width:auto;padding:6px 14px"></button></div>
+      <div class="hdr" style="margin-top:14px">Автоподключение<button class="btn sm" id="acSw" style="width:auto;padding:6px 14px"></button></div>
+      <div class="meta" id="asHint"></div></div>
     <div class="sec"><div class="hdr">Показывать в Discord<button class="btn sm" id="rpcSw" style="width:auto;padding:6px 14px"></button></div><div class="meta" id="rpcHint"></div></div>
     <div class="sec"><div class="hdr">Логи<select id="logLevel" class="s"><option value="warning">Обычные</option><option value="info">Подробные</option><option value="debug">Отладка</option></select></div>
       <div class="seg" id="logTabs"><button data-lg="x" class="act">Xray</button><button data-lg="c">Подписка и кабинет</button></div>
@@ -185,7 +190,7 @@ document.querySelectorAll('[data-logo]').forEach(e=>e.innerHTML=MARK);
 const $=id=>document.getElementById(id);
 const ls={get:(k,d)=>{try{return localStorage.getItem(k)||d}catch{return d}},set:(k,v)=>{try{localStorage.setItem(k,v)}catch{}}};
 const S={theme:ls.get('theme','system'),server:ls.get('server',''),list:[],ping:{},sub:null,dev:null,user:null,subs:[],subId:ls.get('subId',''),auto:+ls.get('auto','300000'),rpc:ls.get('rpc','1')==='1',logLevel:ls.get('logLevel','warning'),sig:'',since:0};
-let on=false,busy=false,reg=false,tgWait=false,watch=null,loading=false,autoT=null,lastLoad=0;
+let autoDone=false,on=false,busy=false,reg=false,tgWait=false,watch=null,loading=false,autoT=null,lastLoad=0;
 const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const rub=k=>(k/100).toFixed(2)+' ₽';
 let tT;function toast(m,c){$('tmsg').textContent=m;$('tdot').style.background=c||'var(--ok)';$('toast').classList.add('show');clearTimeout(tT);tT=setTimeout(()=>$('toast').classList.remove('show'),2400)}
@@ -229,7 +234,7 @@ async function enter(u){view('app');go('pHome');setUser(u);vpn.setRpc(S.rpc);
   if(S.subId&&S.subs.length&&!S.subs.find(x=>x.id===S.subId)){S.subId='';ls.set('subId','');await vpn.setSub('')}
   if(!S.subId&&S.subs.length){S.subId=S.subs[0].id;ls.set('subId',S.subId);await vpn.setSub(S.subId)}
   const m=await vpn.me();if(m.ok&&m.data)setUser(m.data);else if(m.error==='AUTH')return view('login');
-  await refreshSub();poll();loadServers(false);setAuto()}
+  await refreshSub();poll();loadServers(false).then(()=>{if(S.autoc&&!autoDone&&!on&&!busy&&S.server){autoDone=true;$('big').click()}});setAuto()}
 function setUser(u){if(!u)return;S.user=u;const w=u.email||(u.username?'@'+u.username:'');$('acc').textContent=w;
   const b=u.balance_kopeks!=null?u.balance_kopeks/100:u.balance_rubles;if(b!=null)$('bal').textContent=Number(b).toFixed(2)+' ₽'}
 const daysLeft=s=>{if(s.days_left!=null)return s.days_left;const m=/(\d+)\s*d/i.exec(s.time_left_display||'');return m?+m[1]:null};
@@ -390,9 +395,18 @@ init();
 
 /* обновление клиента */
 async function renderUpd(){const r=await vpn.updInfo(),u=r.data||{};$('verTxt').textContent='v'+(u.current||'');
- const b=$('updBtn');b.dataset.m=u.state==='ready'?'i':'c';
- b.textContent=u.state==='ready'?'Установить и перезапустить':'Проверить';
- $('updHint').textContent=!u.enabled?'Автообновление работает только в установленной версии (не portable)':({idle:'',checking:'Проверяю…',latest:'Установлена последняя версия',downloading:'Скачиваю v'+u.version+' — '+u.percent+'%',ready:'Версия v'+u.version+' загружена',error:'Ошибка: '+u.error,off:''})[u.state]||''}
-$('updBtn').onclick=async()=>{if($('updBtn').dataset.m==='i')return vpn.updInstall();await vpn.updCheck();renderUpd()};
+ $('updHint').textContent=!u.enabled?'Автообновление работает в установленной версии':({idle:'Проверка обновлений включена',checking:'Проверяю…',latest:'Установлена последняя версия',downloading:'Скачиваю v'+u.version+' — '+u.percent+'%',ready:'Версия v'+u.version+' загружена',error:'Не удалось проверить: '+u.error,off:''})[u.state]||'';
+ const bar=u.state==='ready'||u.state==='downloading';$('updBar').classList.toggle('hide',!bar);
+ if(bar){$('ubT').textContent=u.state==='ready'?'Доступно обновление v'+u.version:'Загружаю обновление v'+u.version;$('ubS').textContent=u.state==='ready'?'Приложение перезапустится само':u.percent+'%';$('ubB').classList.toggle('hide',u.state!=='ready')}}
+$('ubB').onclick=async()=>{$('ubB').disabled=true;$('ubT').textContent='Устанавливаю…';await vpn.updInstall()};
+/* автозапуск */
+async function renderAuto(){const r=await vpn.autoGet(),a=r.data||{};S.as=!!a.on;S.am=!!a.min;
+ const set=(id,v,dis)=>{const e=$(id);e.classList.toggle('act',v);e.textContent=v?'Вкл':'Выкл';e.disabled=!!dis};
+ set('asSw',S.as,a.packaged===false);set('amSw',S.am,!S.as);set('acSw',S.autoc);
+ $('asHint').textContent=a.packaged===false?'Автозапуск доступен только в установленной версии':'Запуск при входе в Windows с правами администратора, без запроса UAC'}
+$('asSw').onclick=async()=>{const r=await vpn.autoSet(!S.as,S.am);if(!r.ok)toast(r.error,'var(--er)');renderAuto()};
+$('amSw').onclick=async()=>{const r=await vpn.autoSet(true,!S.am);if(!r.ok)toast(r.error,'var(--er)');renderAuto()};
+$('acSw').onclick=()=>{S.autoc=!S.autoc;ls.set('autoc',S.autoc?'1':'0');renderAuto()};
+S.autoc=ls.get('autoc','0')==='1';setTimeout(renderAuto,600);
 setInterval(()=>{if(document.hidden)return;renderUpd()},4000);setTimeout(renderUpd,500);
 </script></body></html>
