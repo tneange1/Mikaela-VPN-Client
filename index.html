@@ -187,7 +187,7 @@ $('eye').onclick=()=>{const h=$('pw').type==='password';$('pw').type=h?'text':'p
 $('go').onclick=async()=>{say('');const e=$('em').value.trim(),p=$('pw').value;if(!e||!p)return say('Введите почту и пароль');
   if(reg){if(p.length<8)return say('Пароль минимум 8 символов');const r=await vpn.register(e,p,$('nm').value.trim());if(r.ok){tab(false);$('em').value=e;say(r.data+' После подтверждения почты нажмите «Войти».',true)}else say(r.error)}
   else{const r=await vpn.login(e,p);r.ok?enter(r.data):say(r.error)}};
-$('pw').onkeydown=e=>e.key==='Enter'&&$('go').click();
+$('pw').onkeydown=e=>{if(e.key==='Enter')$('go').click()}; // НЕ возвращать false — это блокирует ввод
 $('fg').onclick=async()=>{const e=$('em').value.trim();if(!e)return say('Сначала введите почту');const r=await vpn.forgot(e);r.ok?say(r.data,true):say(r.error)};
 $('tg').onclick=async()=>{if(tgWait){await vpn.tgCancel();return}tgWait=true;$('tg').textContent='Жду подтверждения в Telegram… (отмена)';say('Откроется Telegram — нажмите Start у бота',true);
   const r=await vpn.tg();tgWait=false;$('tg').textContent='Войти через Telegram';r.ok?enter(r.data):say(r.error)};
@@ -288,17 +288,26 @@ async function openTopup(){sheet('<h2>Пополнение баланса</h2><d
 function watchBalance(){const start=S.user&&S.user.balance_kopeks;let n=0;if(watch)clearInterval(watch);
   watch=setInterval(async()=>{const m=await vpn.me();if(m.ok&&m.data){setUser(m.data);if(m.data.balance_kopeks!==start){clearInterval(watch);watch=null;closeSheet();refreshSub();toast('Баланс пополнен')}}if(++n>36){clearInterval(watch);watch=null}},5000)}
 
-/* продление */
-$('renewBtn').onclick=async()=>{sheet('<h2>Продление подписки</h2><div class="t2">Загружаю варианты…</div>');const r=await vpn.renewOptions();
+/* продление: варианты и цены берутся из кабинета */
+function renewList(d){
+  let a=Array.isArray(d)?d:(d&&(d.periods||d.options||d.renewal_options||d.renewal_periods||d.available_periods||d.prices||d.items||d.data))||null;
+  if(!a&&d&&typeof d==='object'){const ks=Object.keys(d).filter(k=>/^\d+$/.test(k));if(ks.length)a=ks.map(k=>typeof d[k]==='object'?{days:+k,...d[k]}:{days:+k,price_kopeks:d[k]})}
+  return(Array.isArray(a)?a:[]).map(x=>{if(typeof x==='number')return{days:x};
+    const days=x.period_days??x.days??x.period??x.duration_days??(x.months?x.months*30:null)??x.value;
+    let price=x.price_kopeks??x.final_price_kopeks??x.total_price_kopeks??x.amount_kopeks??null;
+    if(price==null&&x.price_rubles!=null)price=Math.round(x.price_rubles*100);
+    return{days,price,text:x.price_label||x.price_display||x.formatted_price||'',label:x.label||x.title||x.name||x.period_label||'',disc:x.discount_percent||x.discount||0}}).filter(x=>x.days)}
+$('renewBtn').onclick=async()=>{sheet('<h2>Продление подписки</h2><div class="t2">Загружаю варианты из кабинета…</div>');const r=await vpn.renewOptions();
   if(!r.ok)return sheet(`<h2>Продление подписки</h2><div class="er">${esc(r.error)}</div>`);
-  const d=r.data,a=Array.isArray(d)?d:(d.periods||d.options||d.renewal_options||d.items||[]);
-  const list=a.map(x=>({days:x.period_days||x.days||x.period||x.value,price:x.price_kopeks!=null?x.price_kopeks:(x.final_price_kopeks!=null?x.final_price_kopeks:x.total_price_kopeks),label:x.label||x.title||x.name||''})).filter(x=>x.days);
-  if(!list.length)return sheet('<h2>Продление подписки</h2><div class="t2">Для вашего тарифа продление недоступно (возможно, подписка бессрочная).</div>');
-  sheet(`<h2>Продление подписки</h2><div class="t2" style="font-size:14px">Оплата с баланса: ${S.user&&S.user.balance_kopeks!=null?rub(S.user.balance_kopeks):'—'}</div>${list.map((x,i)=>`<button class="btn between" data-i="${i}"><span>${esc(x.label||x.days+' дн.')}</span><span class="t2">${x.price!=null?rub(x.price):''}</span></button>`).join('')}<div id="rm" style="margin-top:12px;font-size:13px"></div>`);
+  const list=renewList(r.data);
+  if(!list.length)return sheet('<h2>Продление подписки</h2><div class="t2">Кабинет не вернул варианты продления для этого тарифа (возможно, подписка бессрочная или продление делается через покупку тарифа). Ответ кабинета записан в логи [renew].</div><button class="btn c" onclick="vpn.openCabinet()">Открыть кабинет</button>');
+  const bal=()=>S.user&&S.user.balance_kopeks!=null?S.user.balance_kopeks:null;
+  sheet(`<h2>Продление подписки</h2><div class="t2" style="font-size:14px">${esc((S.sub&&S.sub.tariff_name)||'Подписка')} · оплата с баланса: ${bal()!=null?rub(bal()):'—'}</div>${list.map((x,i)=>`<button class="btn between" data-i="${i}"><span>${esc(x.label||x.days+' дн.')}${x.disc?` <span class="t2">−${esc(x.disc)}%</span>`:''}</span><span class="t2">${x.price!=null?rub(x.price):esc(x.text)}</span></button>`).join('')}<div id="rm" style="margin-top:12px;font-size:13px"></div>`);
   document.querySelectorAll('[data-i]').forEach(b=>b.onclick=async()=>{const x=list[+b.dataset.i],rm=(t,ok)=>{$('rm').className=ok?'ok':'er';$('rm').textContent=t};
+    if(x.price!=null&&bal()!=null&&x.price>bal())return rm(`Не хватает ${rub(x.price-bal())}. Пополните баланс кнопкой вверху.`);
     if(!confirm(`Продлить на ${x.days} дн.${x.price!=null?' за '+rub(x.price):''}? Деньги спишутся с баланса.`))return;
     const q=await vpn.renew(x.days);if(!q.ok)return rm(q.error+(/средств|balance|insufficient/i.test(q.error)?' — пополните баланс (кнопка вверху).':''));
-    rm('Подписка продлена',true);const m=await vpn.me();if(m.ok&&m.data)setUser(m.data);refreshSub()})};
+    closeSheet();toast('Подписка продлена на '+x.days+' дн.');const m=await vpn.me();if(m.ok&&m.data)setUser(m.data);refreshSub()})};
 
 /* подключение */
 $('big').onclick=async()=>{if(busy)return;busy=true;$('err2').textContent='';
