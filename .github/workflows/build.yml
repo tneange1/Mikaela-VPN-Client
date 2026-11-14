@@ -30,6 +30,11 @@ jobs:
           Expand-Archive wt.zip -DestinationPath wt
           Copy-Item wt/wintun/bin/amd64/wintun.dll -Destination bin -Force
           Get-ChildItem bin | Select-Object Name, Length
+      - name: Version from tag
+        shell: pwsh
+        run: |
+          $t = "${{ github.ref_name }}"
+          if ($t -like 'v*') { npm version $t.Substring(1) --no-git-tag-version --allow-same-version }
       - run: npm install
       - name: Build (publish only on tag v*)
         shell: pwsh
