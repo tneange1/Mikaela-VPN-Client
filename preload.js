@@ -11,5 +11,6 @@ contextBridge.exposeInMainWorld('vpn', {
   renewOptions: () => call('renewoptions'), renew: (d) => call('renew', d),
   logs: () => call('logs'), copyLogs: () => call('copylogs'), clearLogs: () => call('clearlogs'), openLogs: () => call('openlogs'), diag: () => call('diag'),
   subs: () => call('subs'), setSub: (id) => call('setsub', id), setRpc: (e) => call('setrpc', e), rpcInfo: () => call('rpcinfo'),
+  updInfo: () => call('updinfo'), updCheck: () => call('updcheck'), updInstall: () => call('updinstall'),
   openCabinet: () => call('cabinet'),
 });
