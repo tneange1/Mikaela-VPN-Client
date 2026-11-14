@@ -128,6 +128,7 @@ nav button.act{color:var(--tx)}
       <div class="g2" id="themes"><button class="btn c" data-t="system">Как в системе</button><button class="btn c" data-t="light">Белая</button><button class="btn c" data-t="gray">Серая</button><button class="btn c" data-t="dark">Чёрная</button></div></div>
     <div class="sec"><div class="hdr">Автообновление серверов<select id="autoSel" class="s"><option value="60000">каждую минуту</option><option value="300000">каждые 5 минут</option><option value="3600000">раз в час</option></select></div>
       <div class="meta">Новые хосты из панели появятся в списке без перезапуска</div></div>
+    <div class="sec"><div class="hdr">Версия <span id="verTxt" class="meta" style="margin:0"></span><button class="btn sm" id="updBtn" style="width:auto;padding:6px 14px">Проверить</button></div><div class="meta" id="updHint"></div></div>
     <div class="sec"><div class="hdr">Показывать в Discord<button class="btn sm" id="rpcSw" style="width:auto;padding:6px 14px"></button></div><div class="meta" id="rpcHint"></div></div>
     <div class="sec"><div class="hdr">Логи<select id="logLevel" class="s"><option value="warning">Обычные</option><option value="info">Подробные</option><option value="debug">Отладка</option></select></div>
       <textarea id="logBox" readonly spellcheck="false"></textarea>
@@ -335,4 +336,12 @@ $('logClr').onclick=async()=>{await vpn.clearLogs();loadLogs();toast('Журна
 $('logDiag').onclick=async()=>{$('logDiag').disabled=true;await vpn.diag();$('logDiag').disabled=false;loadLogs();toast('Диагностика завершена')};
 setInterval(()=>{if(live()&&!$('pSet').classList.contains('hide'))loadLogs()},2000);
 init();
+
+/* обновление клиента */
+async function renderUpd(){const r=await vpn.updInfo(),u=r.data||{};$('verTxt').textContent='v'+(u.current||'');
+ const b=$('updBtn');b.dataset.m=u.state==='ready'?'i':'c';
+ b.textContent=u.state==='ready'?'Установить и перезапустить':'Проверить';
+ $('updHint').textContent=!u.enabled?'Автообновление работает только в установленной версии (не portable)':({idle:'',checking:'Проверяю…',latest:'Установлена последняя версия',downloading:'Скачиваю v'+u.version+' — '+u.percent+'%',ready:'Версия v'+u.version+' загружена',error:'Ошибка: '+u.error,off:''})[u.state]||''}
+$('updBtn').onclick=async()=>{if($('updBtn').dataset.m==='i')return vpn.updInstall();await vpn.updCheck();renderUpd()};
+setInterval(()=>{if(document.hidden)return;renderUpd()},4000);setTimeout(renderUpd,500);
 </script></body></html>
