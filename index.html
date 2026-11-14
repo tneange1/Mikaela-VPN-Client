@@ -76,22 +76,22 @@ nav button.act{color:var(--tx)}
 .stp button:hover{background:var(--sh)}.stp button:disabled{opacity:.4;cursor:default}
 .stp .num{font-size:40px;font-weight:300;min-width:56px;text-align:center}
 .ctr{text-align:center}
+.rit{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 0;border-bottom:1px solid var(--dv);font-size:14px}.rit .t2{font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.rit button{border:0;background:none;color:var(--t2);font-size:18px;cursor:pointer;padding:0 6px}.rit button:hover{color:var(--er)}.empty{font-size:13px;color:var(--t3);padding:8px 0}
 </style></head><body>
 
 <div id="login" class="screen">
   <div class="brand" style="cursor:default"><span class="logo" data-logo></span>Mikaela VPN</div>
   <h1 class="h1" style="margin-top:34px">Вход</h1>
   <p class="sub">Аккаунт общий с ботом и кабинетом</p>
-  <div class="g2"><button id="tL" class="btn c act">Вход</button><button id="tR" class="btn c">Регистрация</button></div>
+  <div class="g2" id="tabs"><button id="tL" class="btn c act">Вход</button><button id="tR" class="btn c">Регистрация</button></div>
   <input id="nm" class="hide" placeholder="Имя (необязательно)">
   <input id="em" type="email" placeholder="Email">
-  <div class="pwf"><input id="pw" type="password" placeholder="Пароль"><button id="eye" type="button">Показать</button></div>
+  <div class="pwf" id="pwf"><input id="pw" type="password" placeholder="Пароль"><button id="eye" type="button">Показать</button></div>
   <button id="go" class="btn c" style="color:var(--tx)">Войти</button>
   <div id="fgW" style="text-align:right;margin-top:12px"><a id="fg">Забыли пароль / не задан пароль?</a></div>
   <div id="msg" class="er" style="min-height:18px"></div>
-  <div class="t2" style="text-align:center;margin:18px 0 4px;font-size:12px">или</div>
-  <button id="tg" class="btn c">Войти через Telegram</button>
-  <button id="web" class="btn c">Войти через Google</button>
+  <div id="altSep" class="t2 hide" style="text-align:center;margin:18px 0 4px;font-size:12px">или</div>
+  <div id="alt"></div>
 </div>
 
 <div id="app" class="hide">
@@ -140,8 +140,7 @@ nav button.act{color:var(--tx)}
   <section id="pSet" class="hide">
     <h1 class="h1">Настройки</h1>
     <p class="sub" style="display:block">Параметры приложения и журнал xray</p>
-    <div class="sec"><div class="hdr">Тема</div>
-      <div class="seg" id="themes"><button data-t="system">Система</button><button data-t="light">Белая</button><button data-t="gray">Серая</button><button data-t="dark">Чёрная</button></div></div>
+    <div class="sec"><div class="hdr">Тема<select id="themeSel" class="s"><option value="system">Как в системе</option><option value="light">Белая</option><option value="gray">Серая</option><option value="dark">Чёрная</option></select></div></div>
     <div class="sec"><div class="hdr">Автообновление серверов<select id="autoSel" class="s"><option value="60000">каждую минуту</option><option value="300000">каждые 5 минут</option><option value="3600000">раз в час</option></select></div>
       <div class="meta">Новые хосты из панели появятся в списке без перезапуска</div></div>
     <div class="sec"><div class="hdr">Версия <span id="verTxt" class="meta" style="margin:0"></span></div><div class="meta" id="updHint"></div></div>
@@ -149,6 +148,12 @@ nav button.act{color:var(--tx)}
       <div class="hdr" style="margin-top:14px">Запускать свёрнутым<button class="btn sm" id="amSw" style="width:auto;padding:6px 14px"></button></div>
       <div class="hdr" style="margin-top:14px">Автоподключение<button class="btn sm" id="acSw" style="width:auto;padding:6px 14px"></button></div>
       <div class="meta" id="asHint"></div></div>
+    <div class="sec"><div class="hdr">Маршрутизация<select id="rtMode" class="s"><option value="bypass">Всё через VPN, кроме списка</option><option value="only">Только список через VPN</option></select></div>
+      <div class="meta" id="rtHint"></div>
+      <div class="lbl" style="margin:18px 0 4px">Приложения</div><div id="rtApps"></div>
+      <div class="g2"><button class="btn sm" id="rtRun">Из запущенных</button><button class="btn sm" id="rtPick">Выбрать файл…</button></div>
+      <div class="lbl" style="margin:18px 0 4px">Домены</div><div id="rtDoms"></div>
+      <div class="g2" style="grid-template-columns:1fr auto"><input id="rtDom" placeholder="example.com" style="margin:0"><button class="btn sm" id="rtAdd" style="width:auto;padding:0 18px">Добавить</button></div></div>
     <div class="sec"><div class="hdr">Показывать в Discord<button class="btn sm" id="rpcSw" style="width:auto;padding:6px 14px"></button></div><div class="meta" id="rpcHint"></div></div>
     <div class="sec"><div class="hdr">Логи<select id="logLevel" class="s"><option value="warning">Обычные</option><option value="info">Подробные</option><option value="debug">Отладка</option></select></div>
       <div class="seg" id="logTabs"><button data-lg="x" class="act">Xray</button><button data-lg="c">Подписка и кабинет</button></div>
@@ -197,12 +202,12 @@ let tT;function toast(m,c){$('tmsg').textContent=m;$('tdot').style.background=c|
 
 /* тема */
 const mq=matchMedia('(prefers-color-scheme: light)');
-function applyTheme(t){if(t==='auto')t='system';if(t==='black')t='dark';S.theme=t;ls.set('theme',t);document.documentElement.dataset.theme=t==='system'?(mq.matches?'light':'dark'):t;document.querySelectorAll('[data-t]').forEach(b=>b.classList.toggle('act',b.dataset.t===t))}
+function applyTheme(t){if(t==='auto')t='system';if(t==='black')t='dark';S.theme=t;ls.set('theme',t);document.documentElement.dataset.theme=t==='system'?(mq.matches?'light':'dark'):t;if($('themeSel'))$('themeSel').value=t}
 mq.onchange=()=>{if(S.theme==='system')applyTheme('system')};
-document.querySelectorAll('[data-t]').forEach(b=>b.onclick=()=>applyTheme(b.dataset.t));applyTheme(S.theme);
+$('themeSel').onchange=()=>applyTheme($('themeSel').value);applyTheme(S.theme);
 
 /* вход */
-const view=v=>{$('login').classList.toggle('hide',v!=='login');$('app').classList.toggle('hide',v!=='app')};
+const view=v=>{if(v==='login')setTimeout(()=>{try{loadAuthOpts()}catch{}},0);$('login').classList.toggle('hide',v!=='login');$('app').classList.toggle('hide',v!=='app')};
 const say=(t,ok)=>{$('msg').className=ok?'er ok':'er';$('msg').textContent=t||''};
 function tab(r){reg=r;$('tL').classList.toggle('act',!r);$('tR').classList.toggle('act',r);$('nm').classList.toggle('hide',!r);$('go').textContent=r?'Зарегистрироваться':'Войти';$('fgW').classList.toggle('hide',r);$('pw').placeholder=r?'Пароль (минимум 8 символов)':'Пароль';say('')}
 $('tL').onclick=()=>tab(false);$('tR').onclick=()=>tab(true);
@@ -212,9 +217,6 @@ $('go').onclick=async()=>{say('');const e=$('em').value.trim(),p=$('pw').value;i
   else{const r=await vpn.login(e,p);r.ok?enter(r.data):say(r.error)}};
 $('pw').onkeydown=e=>{if(e.key==='Enter')$('go').click()}; // НЕ возвращать false — это блокирует ввод
 $('fg').onclick=async()=>{const e=$('em').value.trim();if(!e)return say('Сначала введите почту');const r=await vpn.forgot(e);r.ok?say(r.data,true):say(r.error)};
-$('tg').onclick=async()=>{if(tgWait){await vpn.tgCancel();return}tgWait=true;$('tg').textContent='Жду подтверждения в Telegram… (отмена)';say('Откроется Telegram — нажмите Start у бота',true);
-  const r=await vpn.tg();tgWait=false;$('tg').textContent='Войти через Telegram';r.ok?enter(r.data):say(r.error)};
-$('web').onclick=async()=>{say('');const r=await vpn.webLogin();r.ok?enter(r.data):say(r.error)};
 $('out').onclick=async()=>{await vpn.logout();S.list=[];S.sub=null;S.dev=null;S.subs=[];view('login')};
 
 /* навигация / окна */
@@ -409,4 +411,38 @@ $('amSw').onclick=async()=>{const r=await vpn.autoSet(true,!S.am);if(!r.ok)toast
 $('acSw').onclick=()=>{S.autoc=!S.autoc;ls.set('autoc',S.autoc?'1':'0');renderAuto()};
 S.autoc=ls.get('autoc','0')==='1';setTimeout(renderAuto,600);
 setInterval(()=>{if(document.hidden)return;renderUpd()},4000);setTimeout(renderUpd,500);
+
+/* способы входа */
+let AO=null,AOt=0;
+async function loadAuthOpts(){if(AO&&Date.now()-AOt<60000)return applyAO();const r=await vpn.authOpts();AO=r.ok?r.data:{email:true,reg:false,telegram:false,oauth:[]};AOt=Date.now();applyAO()}
+function applyAO(){const o=AO;const e=o.email;['tabs','em','pwf','go','fgW'].forEach(i=>$(i).classList.toggle('hide',!e));if(!e)$('nm').classList.add('hide');
+ $('tabs').classList.toggle('hide',!e||!o.reg);if(!o.reg&&reg)tab(false);
+ const b=[];if(o.telegram)b.push('<button class="btn c" data-alt="tg">Войти через Telegram</button>');
+ for(const p of o.oauth)b.push(`<button class="btn c" data-alt="${esc(p.name)}">Войти через ${esc(p.title)}</button>`);
+ $('alt').innerHTML=b.join('');$('altSep').classList.toggle('hide',!b.length||!e);
+ document.querySelectorAll('[data-alt]').forEach(x=>x.onclick=async()=>{const k=x.dataset.alt;
+  if(k==='tg'){if(tgWait){await vpn.tgCancel();return}tgWait=true;const t=x.textContent;x.textContent='Жду подтверждения в Telegram… (отмена)';say('Откроется Telegram — нажмите Start у бота',true);
+   const r=await vpn.tg();tgWait=false;x.textContent=t;r.ok?enter(r.data):say(r.error)}
+  else{say('Откроется окно кабинета — выберите там способ входа',true);const r=await vpn.webLogin(k);r.ok?enter(r.data):say(r.error)}})}
+/* маршрутизация */
+let RT={mode:'bypass',apps:[],domains:[]};
+async function loadRoute(){const r=await vpn.routeGet();if(r.ok)RT=r.data;renderRoute()}
+function renderRoute(){$('rtMode').value=RT.mode;
+ $('rtApps').innerHTML=RT.apps.length?RT.apps.map((a,i)=>`<div class="rit"><div class="grow" style="min-width:0"><div>${esc(a.name)}</div>${a.path?`<div class="t2">${esc(a.path)}</div>`:''}</div><button data-da="${i}">×</button></div>`).join(''):'<div class="empty">Список пуст</div>';
+ $('rtDoms').innerHTML=RT.domains.length?RT.domains.map((x,i)=>`<div class="rit"><div class="grow">${esc(x)}</div><button data-dd="${i}">×</button></div>`).join(''):'<div class="empty">Список пуст</div>';
+ $('rtHint').textContent=RT.mode==='only'?'Через VPN пойдут только приложения и домены из списка, остальное — напрямую':'Приложения и домены из списка пойдут напрямую, минуя VPN';
+ document.querySelectorAll('[data-da]').forEach(b=>b.onclick=()=>{RT.apps.splice(+b.dataset.da,1);saveRoute()});
+ document.querySelectorAll('[data-dd]').forEach(b=>b.onclick=()=>{RT.domains.splice(+b.dataset.dd,1);saveRoute()})}
+let rtT=null;
+async function saveRoute(){const r=await vpn.routeSet(RT);if(r.ok)RT=r.data;renderRoute();clearTimeout(rtT);
+ rtT=setTimeout(async()=>{if(on&&await ask('Маршрутизация изменена. Переподключиться сейчас, чтобы применить?','Переподключить')){busy=true;$('hTxt').textContent='Переподключаю…';await vpn.disconnect();const r=await vpn.connect({server:S.server,logLevel:S.logLevel});if(!r.ok)$('err2').textContent=r.error;busy=false;poll()}else if(on)toast('Применится при следующем подключении','var(--t2)')},600)}
+$('rtMode').onchange=()=>{RT.mode=$('rtMode').value;saveRoute()};
+$('rtAdd').onclick=()=>{const v=$('rtDom').value.trim();if(!v)return;RT.domains.push(v);$('rtDom').value='';saveRoute()};
+$('rtDom').onkeydown=e=>{if(e.key==='Enter')$('rtAdd').click()};
+$('rtPick').onclick=async()=>{const r=await vpn.pickExe();if(r.ok&&r.data){RT.apps.push(r.data);saveRoute()}};
+$('rtRun').onclick=async()=>{sheet('<h2>Запущенные приложения</h2><div class="t2">Загружаю…</div>');const r=await vpn.procs(),l=(r.ok&&r.data)||[];
+ if(!l.length)return sheet('<h2>Запущенные приложения</h2><div class="t2">Окна приложений не найдены. Используйте «Выбрать файл…».</div>');
+ sheet(`<h2>Запущенные приложения</h2><div class="t2" style="font-size:13px;margin-bottom:6px">Нажмите, чтобы добавить в список</div>${l.map((x,i)=>{const has=RT.apps.some(a=>a.name.toLowerCase()===x.name.toLowerCase());return `<button class="btn between" data-p="${i}" ${has?'disabled':''}><span style="min-width:0"><div>${esc(x.name)}</div><div class="t2" style="font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(x.title)}</div></span><span class="t2">${has?'добавлено':'+'}</span></button>`}).join('')}`);
+ document.querySelectorAll('[data-p]').forEach(b=>b.onclick=()=>{RT.apps.push(l[+b.dataset.p]);closeSheet();saveRoute()})};
+setTimeout(loadRoute,400);
 </script></body></html>
