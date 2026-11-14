@@ -14,6 +14,10 @@ let xray = null, sb = null, stopping = false, restarting = false, lastFail = '',
 let lastWarn = '';
 let entries = null, entriesAt = 0, disk = null, stale = false, bgBusy = false; // disk: кэш подписки {url, at, arr}
 const sleep = ms => new Promise(r => setTimeout(r, ms));
+let opChain = Promise.resolve(), opBusy = '';
+const serial = fn => (...a) => { const p = opChain.then(() => fn(...a)); opChain = p.catch(() => {}); return p; };
+let curSub = '';                                   // выбранная подписка (мультитариф)
+const sq = () => curSub ? '?subscription_id=' + encodeURIComponent(curSub) : '';
 const sFile = () => path.join(app.getPath('userData'), 'session.bin');
 const binDir = () => app.isPackaged ? path.join(process.resourcesPath, 'bin') : path.join(__dirname, 'bin');
 const logDir = () => path.join(app.getPath('userData'), 'logs');
@@ -218,7 +222,7 @@ async function me() {
   return session.user;
 }
 const getSub = async () => {
-  const d = await jcall('/cabinet/subscription');
+  const d = await jcall('/cabinet/subscription' + sq());
   const u = d.subscription && d.subscription.subscription_url;
   if (u && (!disk || disk.url !== u)) { disk = { url: u, at: disk ? disk.at : 0, arr: disk ? disk.arr : null }; saveDisk(); log('sub', 'адрес подписки обновлён из кабинета'); }
   return d;
@@ -226,7 +230,7 @@ const getSub = async () => {
 
 // ---------- устройства, баланс, продление ----------
 async function devices() {
-  const d = await jcall('/cabinet/subscription/devices');
+  const d = await jcall('/cabinet/subscription/devices' + sq());
   const arr = Array.isArray(d) ? d : (d.devices || d.items || d.data || []);
   const mine = hwid();
   const list = arr.map(x => ({
@@ -236,20 +240,48 @@ async function devices() {
   const n = typeof d.total === 'number' ? d.total : typeof d.connected === 'number' ? d.connected : list.length;
   return { list, count: n, limit: d.device_limit != null ? d.device_limit : (d.limit != null ? d.limit : null) };
 }
-const resetDevices = () => jcall('/cabinet/subscription/devices', 'DELETE');
-const delDevice = h => jcall('/cabinet/subscription/devices/' + encodeURIComponent(h), 'DELETE');
+const resetDevices = () => jcall('/cabinet/subscription/devices' + sq(), 'DELETE');
+const delDevice = h => jcall('/cabinet/subscription/devices/' + encodeURIComponent(h) + sq(), 'DELETE');
 const methods = () => jcall('/cabinet/balance/payment-methods');
 async function topup(o) {
   const d = await jcall('/cabinet/balance/topup', 'POST', { amount_kopeks: o.amount_kopeks, payment_method: o.payment_method, payment_option: o.payment_option || undefined });
   if (d.payment_url && /^https:\/\//.test(d.payment_url)) shell.openExternal(d.payment_url);
   return d;
 }
-const renewOptions = () => jcall('/cabinet/subscription/renewal-options');
-const renew = days => jcall('/cabinet/subscription/renew', 'POST', { period_days: days });
+const renewOptions = () => jcall('/cabinet/subscription/renewal-options' + sq());
+const renew = days => jcall('/cabinet/subscription/renew' + sq(), 'POST', { period_days: days });
 
+const normSub = x => ({ id: String(x.id != null ? x.id : (x.subscription_id != null ? x.subscription_id : '')), name: x.tariff_name || x.name || (x.tariff && x.tariff.name) || 'Подписка', days: x.days_left != null ? x.days_left : null, status: x.status || '', trial: !!x.is_trial });
+async function listSubs() { // список подписок пользователя; эндпоинт в документации не описан — пробуем варианты
+  for (const p of ['/cabinet/subscriptions', '/cabinet/subscription/list']) {
+    try {
+      const r = await authed(p); if (!r.ok) { log('sub', `${p} → ${r.status}`); continue; }
+      const d = await r.json(), a = Array.isArray(d) ? d : (d.subscriptions || d.items || d.data || []);
+      const list = (Array.isArray(a) ? a : []).map(normSub).filter(x => x.id);
+      if (list.length) { log('sub', `подписки (${p}): ` + list.map(x => `${x.id}:${x.name}`).join(', ')); return list; }
+    } catch (e) { if (e.message === 'AUTH') throw e; }
+  }
+  return [];
+}
+function setSub(id) {
+  id = String(id || '');
+  if (id === curSub) return true;
+  curSub = id; entries = null; entriesAt = 0;
+  disk = { url: null, at: 0, arr: null, ips: (disk && disk.ips) || {} }; saveDisk();
+  log('sub', 'выбрана подписка: ' + (id || 'по умолчанию'));
+  return true;
+}
 // ---------- подписка: Xray JSON (как в Happ) ----------
 const isProxy = o => o && o.protocol && !['freedom', 'blackhole', 'dns', 'loopback'].includes(o.protocol);
 const hostOf = o => { const s = o.settings || {}, v = (s.vnext && s.vnext[0]) || (s.servers && s.servers[0]) || s; return v && v.address ? { host: String(v.address), port: +v.port || 443 } : null; };
+function parseDesc(cfg) {
+  const m = cfg && cfg.meta, v = (m && typeof m === 'object' && (m.serverDescription || m.server_description || m.description)) || cfg.serverDescription || '';
+  if (typeof v !== 'string' || !v) return '';
+  if (/^[A-Za-z0-9+/]{8,}={0,2}$/.test(v) && v.length % 4 === 0) {
+    try { const d = Buffer.from(v, 'base64').toString('utf8'); if (d && !d.includes('\ufffd') && /^[\p{L}\p{N}\p{P}\p{S}\s]+$/u.test(d)) return d.slice(0, 80); } catch {}
+  }
+  return v.slice(0, 80);
+}
 let ph = 0;
 function buildEntries(arr) {
   const seen = new Set(), out = []; ph = 0;
@@ -264,7 +296,7 @@ function buildEntries(arr) {
     const name = cfg.remarks || cfg.ps || 'server';
     let t = name, i = 2; while (seen.has(t)) t = `${name} ${i++}`; seen.add(t);
     const ss = subj[0].streamSettings || {};
-    out.push({ tag: t, cfg, udp: /hysteria/i.test(String(subj[0].protocol) + ' ' + String(ss.network)), auto: !!bal && subj.length > 1, count: subj.length, hosts: hosts.filter(h => !BAD.includes(h.host)),
+    out.push({ tag: t, cfg, desc: parseDesc(cfg), udp: /hysteria/i.test(String(subj[0].protocol) + ' ' + String(ss.network)), auto: !!bal && subj.length > 1, count: subj.length, hosts: hosts.filter(h => !BAD.includes(h.host)),
       proto: String(subj[0].protocol || '').toUpperCase(), net: String(ss.network || 'tcp').toUpperCase(), sec: ss.security && ss.security !== 'none' ? String(ss.security).toUpperCase() : '' });
   }
   return out;
@@ -290,7 +322,7 @@ async function pullArr(url, fast) { // скачать Xray JSON с панели 
       const arr = Array.isArray(j) ? j : (j && Array.isArray(j.outbounds) ? [j] : null);
       if (!arr || !arr.length) { lastE = 'JSON без конфигов'; log('sub', lastE); continue; }
       const ents = buildEntries(arr);
-      if (ents.length) { log('sub', `серверов: ${ents.length}: ` + ents.map(e => e.tag + (e.auto ? ` [авто, ${e.count} узлов]` : '') + (e.udp ? ' [UDP]' : '')).join('; ')); return arr; }
+      if (ents.length) { log('sub', `серверов: ${ents.length}: ` + ents.map(e => e.tag + (e.auto ? ` [авто, ${e.count} узлов]` : '') + (e.udp ? ' [UDP]' : '')).join('; ')); log('sub', 'описания: ' + (ents.filter(e => e.desc).map(e => e.tag + ' → ' + e.desc).join('; ') || 'нет') + ' | meta: ' + JSON.stringify(arr[0] && arr[0].meta).slice(0, 160)); return arr; }
       lastE = ph ? 'панель вернула заглушку — вероятно, достигнут лимит устройств (удалите лишнее на вкладке «Устройства»)' : 'в ответе нет подходящих серверов';
       log('sub', lastE);
     } catch (e) { lastE = e.message; log('sub', 'ошибка: ' + e.message); }
@@ -322,7 +354,7 @@ async function loadEntries(force, fast) {
     throw e;
   }
 }
-const view = () => ({ list: entries.map(e => ({ tag: e.tag, auto: e.auto, count: e.count, proto: e.proto, net: e.net, sec: e.sec, udp: e.udp })), at: entriesAt, stale });
+const view = () => ({ list: entries.map(e => ({ tag: e.tag, desc: e.desc, auto: e.auto, count: e.count, proto: e.proto, net: e.net, sec: e.sec, udp: e.udp })), at: entriesAt, stale, sig: crypto.createHash('md5').update(entries.map(e => e.tag + '|' + e.hosts.map(h => h.host).join(',')).join(';')).digest('hex').slice(0, 10) });
 function refreshBg() { if (bgBusy) return; bgBusy = true; loadEntries(true).catch(() => {}).finally(() => { bgBusy = false; }); }
 async function servers(o) {
   if (!(o && o.force)) {
@@ -340,8 +372,24 @@ const tcpPing = async h => { // сначала определяем IP (сист
     s.on('timeout', () => { s.destroy(); res({ ms: -1, why: `TCP ${ip}:${h.port} не отвечает` }); });
   });
 };
+let pingChain = Promise.resolve();
+const proxyPing = e => { const p = pingChain.then(() => doProxyPing(e)); pingChain = p.catch(() => {}); return p; };
+async function doProxyPing(entry) { // временный Xray на порту 10871: реальная задержка через сервер (для UDP/Hysteria)
+  const port = XRAY_PORT + 1, f = path.join(app.getPath('userData'), 'xray-ping.json');
+  let p;
+  try {
+    const ips = await resolveAll(hostsOf(entry), true);
+    fs.writeFileSync(f, JSON.stringify(xrayConfig(entry, 'none', ips, port)));
+    p = spawn(path.join(binDir(), 'xray.exe'), ['run', '-c', f], { windowsHide: true, cwd: binDir(), env: { ...process.env, XRAY_LOCATION_ASSET: binDir() } });
+    let up = false;
+    for (let i = 0; i < 25 && !up; i++) { await sleep(150); up = await portOpen(port, 250); }
+    if (!up) return { ms: -1, why: 'xray не стартовал' };
+    const r = await socksProbe(7000, port); return { ms: r.ms };
+  } catch (e) { return { ms: -1, why: 'UDP: ' + e.message }; }
+  finally { try { if (p) p.kill(); } catch {} }
+}
 async function pingOne(e) {
-  if (e.udp) return { ms: -2 };
+  if (e.udp) return proxyPing(e);
   const rs = await Promise.all(e.hosts.map(tcpPing)), ok = rs.filter(r => r.ms >= 0);
   return ok.length ? { ms: Math.min(...ok.map(r => r.ms)) } : { ms: -1, why: [...new Set(rs.map(r => r.why))].join(' / ') };
 }
@@ -404,11 +452,11 @@ function pinAddress(o, ips) { // подставить IP сервера, SNI/hos
   if (ss.wsSettings && !ss.wsSettings.host && !(ss.wsSettings.headers && ss.wsSettings.headers.Host)) ss.wsSettings.host = h;
   v.address = ips[h];
 }
-function xrayConfig(entry, level, ips) {
+function xrayConfig(entry, level, ips, port = XRAY_PORT) {
   const c = JSON.parse(JSON.stringify(entry.cfg));
   delete c.meta; delete c.remarks; delete c.remnawave;
   for (const o of (c.outbounds || [])) if (isProxy(o)) pinAddress(o, ips);
-  c.inbounds = [{ tag: 'socks', listen: '127.0.0.1', port: XRAY_PORT, protocol: 'socks', settings: { auth: 'noauth', udp: true, ip: '127.0.0.1' },
+  c.inbounds = [{ tag: 'socks', listen: '127.0.0.1', port, protocol: 'socks', settings: { auth: 'noauth', udp: true, ip: '127.0.0.1' },
     sniffing: { enabled: true, destOverride: ['http', 'tls', 'quic'], routeOnly: true } }]; // routeOnly: адрес назначения не подменяется доменом
   c.log = { loglevel: level };
   return c;
@@ -428,16 +476,19 @@ async function resolveHost(h) {
   if (old) log('dns', `${h}: используем прошлый IP из кэша`);
   return old || null;
 }
-async function resolveAll(hosts) {
+async function resolveAll(hosts, cached) {
   const map = {}, t0 = Date.now();
-  await Promise.all(hosts.map(async h => { const ip = await resolveHost(h); if (ip) { map[h] = ip; if (!net.isIP(h) && disk) { disk.ips = disk.ips || {}; disk.ips[h] = ip; } } else log('dns', `${h}: IP определить не удалось`); }));
+  await Promise.all(hosts.map(async h => { const ip = (cached && disk && disk.ips && disk.ips[h]) || await resolveHost(h); if (ip) { map[h] = ip; if (!net.isIP(h) && disk) { disk.ips = disk.ips || {}; disk.ips[h] = ip; } } else log('dns', `${h}: IP определить не удалось`); }));
   if (disk) saveDisk();
   log('dns', 'адреса серверов: ' + (Object.entries(map).filter(([h]) => !net.isIP(h)).map(([h, ip]) => `${h}→${ip}`).join(', ') || '—') + ` (${Date.now() - t0} мс)`);
   return map;
 }
-async function startXray(entry, level) {
+const hostsOf = entry => [...new Set((entry.cfg.outbounds || []).filter(isProxy).map(o => { const h = hostOf(o); return h && h.host; }).filter(Boolean))];
+const freePort = async port => { for (let i = 0; i < 12; i++) { if (!(await portOpen(port, 300))) return true; await sleep(300); } return false; };
+async function startXray(entry, level, pre) {
   const hosts = [...new Set((entry.cfg.outbounds || []).filter(isProxy).map(o => { const h = hostOf(o); return h && h.host; }).filter(Boolean))];
-  const ips = await resolveAll(hosts);
+  const ips = pre || await resolveAll(hosts);
+  if (!(await freePort(XRAY_PORT))) throw new Error('Порт ' + XRAY_PORT + ' занят другим процессом. Закройте лишние копии Xray/клиентов.');
   const f = path.join(app.getPath('userData'), 'xray-config.json');
   fs.writeFileSync(f, JSON.stringify(xrayConfig(entry, level, ips), null, 2));
   log('xray', `сервер «${entry.tag}»${entry.auto ? ` (автовыбор, ${entry.count} узлов)` : ''}`);
@@ -454,10 +505,10 @@ async function startXray(entry, level) {
   }
   throw new Error('Xray не открыл порт ' + XRAY_PORT + ': ' + p.tail());
 }
-function socksProbe(ms) { // HTTP-запрос к 1.1.1.1:80 через локальный socks Xray (до включения TUN)
+function socksProbe(ms, port = XRAY_PORT) { // HTTP-запрос к 1.1.1.1:80 через локальный socks Xray (до включения TUN)
   return new Promise((resolve, reject) => {
     const t0 = Date.now(); let step = 0, buf = Buffer.alloc(0), done = false;
-    const s = net.connect({ host: '127.0.0.1', port: XRAY_PORT });
+    const s = net.connect({ host: '127.0.0.1', port });
     const fin = (err, val) => { if (done) return; done = true; clearTimeout(tm); s.destroy(); err ? reject(err) : resolve(val); };
     const tm = setTimeout(() => fin(new Error(`нет ответа за ${ms / 1000} с`)), ms);
     s.on('error', e => fin(e));
@@ -527,7 +578,7 @@ async function stopAll(reason) {
   const had = !!(sb || xray);
   sb = null; xray = null; savePids();
   if (had) log('app', 'остановлено' + (reason ? ': ' + reason : ''));
-  await sleep(150); stopping = false;
+  await sleep(150); stopping = false; rpcSince = 0; rpcUpdate();
 }
 const probe = async (url, ms = 10000) => { const t = Date.now(); const r = await enet.fetch(url, { signal: AbortSignal.timeout(ms) }); return { r, ms: Date.now() - t }; };
 async function afterConnectTest() {
@@ -551,7 +602,7 @@ async function connect(o = {}) {
     await startXray(entry, lastLevel);
     await verifyTunnel(entry);
     await startSingbox(lastLevel);
-    log('app', 'подключено'); afterConnectTest().catch(() => {}); setTimeout(refreshBg, 6000);
+    log('app', 'подключено'); rpcSince = Math.floor(Date.now() / 1000); rpcUpdate(); afterConnectTest().catch(() => {}); setTimeout(refreshBg, 6000);
     return true;
   } catch (e) { log('app', 'ОШИБКА подключения: ' + e.message); await stopAll('ошибка'); throw e; }
 }
@@ -560,11 +611,15 @@ async function pick(tag) {
   if (!(xray && sb)) return true;
   const e = (entries || []).find(x => x.tag === tag);
   if (!e) return false;
-  log('app', `переключение на «${tag}»`);
-  restarting = true;
-  try { if (xray) { xray.removeAllListeners('exit'); xray.kill(); xray = null; } await sleep(300); await startXray(e, lastLevel); await verifyTunnel(e); }
-  catch (err) { await stopAll('ошибка переключения'); throw err; }
-  finally { restarting = false; }
+  opBusy = 'switch'; log('app', `переключение на «${tag}»`);
+  try {
+    const ips = await resolveAll(hostsOf(e), true);        // пока старый Xray ещё работает — DNS идёт через него
+    restarting = true;
+    if (xray) { xray.removeAllListeners('exit'); xray.kill(); xray = null; }
+    await sleep(350);
+    await startXray(e, lastLevel, ips); await verifyTunnel(e);
+  } catch (err) { await stopAll('ошибка переключения'); throw err; }
+  finally { restarting = false; opBusy = ''; }
   return true;
 }
 async function diag() {
@@ -581,6 +636,53 @@ async function diag() {
   return true;
 }
 
+// ===== Discord Rich Presence: реклама проекта =====
+const RPC = {
+  clientId: process.env.MIKAELA_DISCORD_ID || '',      // <-- вставьте Application ID из discord.com/developers
+  largeImage: 'logo',                                   // ключ картинки в Rich Presence → Art Assets
+  largeText: 'Mikaela VPN',
+  details: 'Быстрый и стабильный VPN',
+  stateOn: 'Защита включена', stateOff: 'Ожидает подключения',
+  buttons: [{ label: 'Telegram-бот', url: 'https://t.me/vpnmikaelabot' }, { label: 'Личный кабинет', url: 'https://cabinet.mikaelavpn.xyz' }],
+};
+let rpcOn = false, rpcSock = null, rpcReady = false, rpcTimer = null, rpcSince = 0;
+const rpcFrame = (op, obj) => { const b = Buffer.from(JSON.stringify(obj)), h = Buffer.alloc(8); h.writeInt32LE(op, 0); h.writeInt32LE(b.length, 4); return Buffer.concat([h, b]); };
+function rpcConnect(i = 0) {
+  if (!rpcOn || !RPC.clientId || rpcSock) return;
+  if (i > 9) { rpcTimer = setTimeout(() => rpcConnect(0), 30000); return; }
+  const s = net.connect('\\\\?\\pipe\\discord-ipc-' + i);
+  let buf = Buffer.alloc(0), opened = false;
+  s.on('connect', () => { opened = true; rpcSock = s; s.write(rpcFrame(0, { v: 1, client_id: RPC.clientId })); });
+  s.on('data', d => {
+    buf = Buffer.concat([buf, d]);
+    while (buf.length >= 8) {
+      const op = buf.readInt32LE(0), len = buf.readInt32LE(4);
+      if (buf.length < 8 + len) break;
+      let msg = {}; try { msg = JSON.parse(buf.slice(8, 8 + len).toString() || '{}'); } catch {}
+      buf = buf.slice(8 + len);
+      if (op === 3) s.write(rpcFrame(4, msg));
+      if (op === 2) { log('discord', 'Discord закрыл соединение: ' + (msg.message || msg.code || '')); s.destroy(); }
+      if (msg.evt === 'READY') { rpcReady = true; log('discord', 'подключено'); rpcUpdate(); }
+      if (msg.evt === 'ERROR') log('discord', 'ошибка: ' + JSON.stringify(msg.data));
+    }
+  });
+  s.on('error', () => { if (!opened) rpcConnect(i + 1); });
+  s.on('close', () => { if (rpcSock === s) { rpcSock = null; rpcReady = false; } if (opened && rpcOn) rpcTimer = setTimeout(() => rpcConnect(0), 15000); });
+}
+function rpcUpdate() {
+  if (!rpcSock || !rpcReady) return;
+  const on = !!(xray && sb);
+  const activity = { details: RPC.details, state: on ? RPC.stateOn : RPC.stateOff, assets: { large_image: RPC.largeImage, large_text: RPC.largeText }, buttons: RPC.buttons.slice(0, 2) };
+  if (on) activity.timestamps = { start: rpcSince || Math.floor(Date.now() / 1000) };
+  rpcSock.write(rpcFrame(1, { cmd: 'SET_ACTIVITY', args: { pid: process.pid, activity }, nonce: crypto.randomUUID() }));
+}
+function setRpc(en) {
+  rpcOn = en; clearTimeout(rpcTimer);
+  if (!RPC.clientId) { if (en) log('discord', 'не задан Application ID (RPC.clientId в main.js)'); return; }
+  if (en) { if (!rpcSock) rpcConnect(0); else rpcUpdate(); }
+  else if (rpcSock) { try { rpcSock.write(rpcFrame(1, { cmd: 'SET_ACTIVITY', args: { pid: process.pid, activity: null }, nonce: crypto.randomUUID() })); } catch {} const s = rpcSock; setTimeout(() => s.destroy(), 200); }
+}
+
 const h = (c, f) => ipcMain.handle(c, async (_, ...a) => {
   try { return { ok: true, data: await f(...a) }; }
   catch (e) { return { ok: false, error: e.message }; }
@@ -589,12 +691,12 @@ h('session', () => session ? session.user : null);
 h('login', login);
 h('logout', async () => { await stopAll('выход'); try { await authed('/cabinet/auth/logout', { method: 'POST', headers: J, body: JSON.stringify({ refresh_token: session.refresh }) }); } catch {} session = null; entries = null; save(); });
 h('sub', getSub);
-h('connect', connect);
-h('disconnect', () => stopAll('по кнопке'));
-h('status', async () => { const e = lastFail, w = lastWarn; lastFail = ''; lastWarn = ''; return { running: !!(xray && sb), error: e, warn: w, ea: entriesAt, stale }; });
+h('connect', serial(async o => { opBusy = 'connect'; try { return await connect(o); } finally { opBusy = ''; } }));
+h('disconnect', serial(() => stopAll('по кнопке')));
+h('status', async () => { const e = lastFail, w = lastWarn; lastFail = ''; lastWarn = ''; return { running: !!(xray && sb) || opBusy === 'switch', op: opBusy, error: e, warn: w, ea: entriesAt, stale }; });
 h('servers', servers);
 h('pingmany', pingMany);
-h('pick', pick);
+h('pick', serial(pick));
 h('devices', devices);
 h('deldevice', delDevice);
 h('resetdevices', resetDevices);
@@ -610,6 +712,10 @@ h('tgcancel', async () => { tgCancel = true; });
 h('weblogin', webLogin);
 h('me', me);
 h('cabinet', () => shell.openExternal(CABINET));
+h('subs', listSubs);
+h('setsub', setSub);
+h('setrpc', async en => { setRpc(!!en); return true; });
+h('rpcinfo', async () => ({ configured: !!RPC.clientId, connected: rpcReady }));
 h('logs', async () => logBuf.slice(-700).join('\n'));
 h('copylogs', async () => { clipboard.writeText(logBuf.join('\n')); return true; });
 h('clearlogs', async () => { logBuf.length = 0; pend.length = 0; try { fs.rmSync(logDir(), { recursive: true, force: true }); } catch {} return true; });
@@ -621,10 +727,10 @@ app.whenReady().then(() => {
   load(); loadDisk(); proxyOffSync(); killOrphans();
   log('app', `запуск ${app.getName()} ${app.getVersion()}, Windows ${os.release()}, bin: ${binDir()}`);
   win = new BrowserWindow({
-    width: 440, height: 800, resizable: false, autoHideMenuBar: true, backgroundColor: '#0b0f1a',
+    width: 440, height: 820, resizable: false, autoHideMenuBar: true, backgroundColor: '#111111',
     title: 'Mikaela VPN', webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true },
   });
   win.loadFile('index.html');
 });
-app.on('before-quit', () => { for (const p of [sb, xray]) { try { if (p) p.kill(); } catch {} } });
+app.on('before-quit', () => { try { if (rpcSock) rpcSock.destroy(); } catch {} for (const p of [sb, xray]) { try { if (p) p.kill(); } catch {} } });
 app.on('window-all-closed', () => app.quit());
