@@ -1,7 +1,7 @@
 {
   "name": "mikaela-vpn",
   "productName": "Mikaela VPN",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Mikaela VPN client (sing-box)",
   "main": "main.js",
   "scripts": {
@@ -33,11 +33,11 @@
     ],
     "win": {
       "target": [
-        "nsis",
-        "portable"
+        "nsis"
       ],
       "requestedExecutionLevel": "requireAdministrator",
-      "icon": "icon.ico"
+      "icon": "icon.ico",
+      "artifactName": "Mikaela-VPN-Setup-${version}.exe"
     },
     "nsis": {
       "oneClick": false,
