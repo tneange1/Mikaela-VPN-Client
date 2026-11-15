@@ -77,7 +77,13 @@ nav button.act{color:var(--tx)}
 .ctr{text-align:center}
 .rit{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 0;border-bottom:1px solid var(--dv);font-size:14px}.rit .t2{font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.rit button{border:0;background:none;color:var(--t2);font-size:18px;cursor:pointer;padding:0 6px}.rit button:hover{color:var(--er)}.empty{font-size:13px;color:var(--t3);padding:8px 0}
 .bk{border:0;background:none;color:var(--t2);font:inherit;font-size:14px;cursor:pointer;padding:0;margin-bottom:6px}.bk:hover{color:var(--tx)}
+#updOv{position:fixed;inset:0;z-index:100;display:flex;align-items:center;justify-content:center;padding:28px;background:rgba(0,0,0,.45);-webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px)}
+#updOv .box{width:100%;max-width:340px;text-align:center;padding:28px 24px;border-radius:20px;background:var(--bg);border:1px solid var(--bd)}
+#updOv h2{font-size:20px;font-weight:500;margin:14px 0 8px}#updOv p{font-size:14px;color:var(--t2);line-height:1.5;margin:0 0 20px}
+.prg{height:6px;border-radius:99px;background:var(--sf);border:1px solid var(--bd);overflow:hidden;margin-bottom:6px}.prg i{display:block;height:100%;width:0;background:var(--ok);transition:width .3s}
 </style></head><body>
+<div id="updOv" class="hide"><div class="box"><span class="logo" data-logo style="display:inline-flex"></span><h2 id="uoT">Доступно обновление</h2><p id="uoP">Чтобы продолжить пользоваться приложением, обновите его до последней версии.</p><div id="uoPr" class="hide"><div class="prg"><i id="uoBar"></i></div><div class="meta" id="uoPc"></div></div><button class="btn c hide" id="uoB" style="margin-top:6px">Обновить</button></div></div>
+  
 
 <div id="login" class="screen">
   <div class="brand" style="cursor:default"><span class="logo" data-logo></span>Mikaela VPN</div>
@@ -141,12 +147,12 @@ nav button.act{color:var(--tx)}
     <div id="sMain">
       <h1 class="h1">Настройки</h1>
       <p class="sub" style="display:block">Параметры приложения</p>
-      <div class="sec"><div class="hdr">Тема<select id="themeSel" class="s"><option value="system">Как в системе</option><option value="light">Белая</option><option value="gray">Серая</option><option value="dark">Чёрная</option></select></div></div>
+      <button class="btn between" data-sp="sAdv"><span>Дополнительные настройки</span><span class="t2">›</span></button>
+      <button class="btn between" data-sp="sRt"><span>Маршрутизация</span><span class="t2">›</span></button>
+      <div class="sec" style="margin-top:34px"><div class="hdr">Тема<select id="themeSel" class="s"><option value="system">Как в системе</option><option value="light">Белая</option><option value="gray">Серая</option><option value="dark">Чёрная</option></select></div></div>
       <div class="sec"><div class="hdr">Автообновление серверов<select id="autoSel" class="s"><option value="60000">каждую минуту</option><option value="300000">каждые 5 минут</option><option value="3600000">раз в час</option></select></div>
         <div class="meta">Новые хосты из панели появятся в списке без перезапуска</div></div>
       <div class="sec"><div class="hdr">Версия <span id="verTxt" class="meta" style="margin:0"></span></div><div class="meta" id="updHint"></div></div>
-      <button class="btn between" data-sp="sAdv" style="margin-top:30px"><span>Дополнительные настройки</span><span class="t2">›</span></button>
-      <button class="btn between" data-sp="sRt"><span>Маршрутизация</span><span class="t2">›</span></button>
       <div class="sec"><div class="hdr" id="acc">—</div><button class="btn c" id="out">Выйти из аккаунта</button></div>
     </div>
     <div id="sAdv" class="hide">
@@ -409,9 +415,10 @@ init();
 /* обновление клиента */
 async function renderUpd(){const r=await vpn.updInfo(),u=r.data||{};$('verTxt').textContent='v'+(u.current||'');
  $('updHint').textContent=!u.enabled?'Автообновление работает в установленной версии':({idle:'Проверка обновлений включена',checking:'Проверяю…',latest:'Установлена последняя версия',downloading:'Скачиваю v'+u.version+' — '+u.percent+'%',ready:'Версия v'+u.version+' загружена',error:'Не удалось проверить: '+u.error,off:''})[u.state]||'';
- const bar=u.state==='ready'||u.state==='downloading';$('updBar').classList.toggle('hide',!bar);
- if(bar){$('ubT').textContent=u.state==='ready'?'Доступно обновление v'+u.version:'Загружаю обновление v'+u.version;$('ubS').textContent=u.state==='ready'?'Приложение перезапустится само':u.percent+'%';$('ubB').classList.toggle('hide',u.state!=='ready')}}
-$('ubB').onclick=async()=>{$('ubB').disabled=true;$('ubT').textContent='Устанавливаю…';await vpn.updInstall()};
+ const dl=u.state==='downloading',rd=u.state==='ready';$('updOv').classList.toggle('hide',!(dl||rd));
+ if(dl||rd){$('uoT').textContent='Доступно обновление v'+u.version;$('uoP').textContent=rd?'Для продолжения работы нужно обновить приложение. Оно перезапустится автоматически.':'Загружаю новую версию…';
+  $('uoPr').classList.toggle('hide',!dl);$('uoBar').style.width=(u.percent||0)+'%';$('uoPc').textContent=(u.percent||0)+'%';$('uoB').classList.toggle('hide',!rd)}}
+$('uoB').onclick=async()=>{$('uoB').disabled=true;$('uoB').textContent='Устанавливаю…';await vpn.updInstall()};
 /* автозапуск */
 async function renderAuto(){const r=await vpn.autoGet(),a=r.data||{};S.as=!!a.on;S.am=!!a.min;
  const set=(id,v,dis)=>{const e=$(id);e.classList.toggle('act',v);e.textContent=v?'Вкл':'Выкл';e.disabled=!!dis};
