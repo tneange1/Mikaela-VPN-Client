@@ -539,10 +539,13 @@ function happAdapter() {
 }
 async function startSingbox(level) {
   const RT = routeRules();
+  // адреса серверов исключаем из TUN: пинг из приложения идёт напрямую и показывает реальную задержку, а не локальный ответ TUN
+  const ipm = await resolveAll([...new Set((entries || []).flatMap(hostsOf))], true).catch(() => ({}));
+  const excl = [...new Set(Object.values(ipm || {}).filter(v => net.isIPv4(v)).map(v => v + '/32'))];
   const cfg = {
     log: { level: level === 'debug' ? 'debug' : level === 'info' ? 'info' : 'warn', timestamp: false },
     dns: { servers: [{ type: 'tcp', tag: 'dns-remote', server: '1.1.1.1', detour: 'xray' }], final: 'dns-remote', strategy: 'ipv4_only' },
-    inbounds: [{ type: 'tun', tag: 'tun-in', address: ['172.19.0.1/30'], auto_route: true, strict_route: true, stack: 'mixed' }],
+    inbounds: [{ type: 'tun', tag: 'tun-in', address: ['172.19.0.1/30'], auto_route: true, strict_route: true, stack: 'mixed', ...(excl.length ? { route_exclude_address: excl } : {}) }],
     outbounds: [{ type: 'socks', tag: 'xray', server: '127.0.0.1', server_port: XRAY_PORT, version: '5' }, { type: 'direct', tag: 'direct' }],
     route: {
       rules: [
@@ -850,7 +853,7 @@ function initUpdater() {
     updater.on('update-downloaded', i => { upd = { state: 'ready', version: i.version, percent: 100, error: '' }; });
     updater.on('error', e => { upd.state = 'error'; upd.error = String(e && e.message || e).slice(0, 200); });
     const chk = () => updater.checkForUpdates().catch(() => {});
-    setTimeout(chk, 8000); setInterval(chk, 3600000);
+    setTimeout(chk, 8000); setInterval(chk, 900000);
   } catch (e) { upd.state = 'off'; log('update', 'не запущено: ' + e.message); }
 }
 h('updinfo', async () => ({ ...upd, current: app.getVersion(), enabled: !!updater }));
