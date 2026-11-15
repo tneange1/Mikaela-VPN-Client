@@ -25,29 +25,13 @@ const logDir = () => path.join(app.getPath('userData'), 'logs');
 // ---------- логи ----------
 const logBuf = { x: [], c: [] }, pend = { x: [], c: [] };
 const LOGF = { x: 'xray.log', c: 'cabinet.log' };
-const CAB_TAGS = /^(sub|auth|api|renew|dev|bal|update|discord)$/;
 const mask = s => String(s).replace(/\x1b\[[0-9;]*m/g, '').replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, m => m.slice(0, 8) + '…');
+// журналы отключены: хранится только короткий буфер в памяти (для внутренних нужд), на диск ничего не пишется
 function log(tag, msg) {
-  const t = new Date(), p = (n, l = 2) => String(n).padStart(l, '0');
-  const line = `${p(t.getHours())}:${p(t.getMinutes())}:${p(t.getSeconds())}.${p(t.getMilliseconds(), 3)} [${tag}] ${mask(msg)}`;
-  const k = CAB_TAGS.test(tag) ? 'c' : 'x';
-  logBuf[k].push(line); if (logBuf[k].length > 1500) logBuf[k].splice(0, logBuf[k].length - 1500);
-  pend[k].push(line);
+  const k = /^(sub|auth|api|renew|dev|bal|update|discord)$/.test(tag) ? 'c' : 'x';
+  logBuf[k].push(mask(msg)); if (logBuf[k].length > 200) logBuf[k].splice(0, logBuf[k].length - 200);
 }
-function flushLogs() {
-  for (const k of ['x', 'c']) {
-    if (!pend[k].length) continue;
-    const txt = pend[k].splice(0).join('\n') + '\n';
-    try { fs.mkdirSync(logDir(), { recursive: true }); fs.appendFileSync(path.join(logDir(), LOGF[k]), txt); } catch {}
-  }
-}
-setInterval(flushLogs, 700);
-// автоочистка раз в 3 минуты: память и файлы
-setInterval(() => {
-  flushLogs();
-  for (const k of ['x', 'c']) { logBuf[k].length = 0; try { fs.rmSync(path.join(logDir(), LOGF[k]), { force: true }); } catch {} }
-  try { fs.rmSync(path.join(logDir(), 'app.log'), { force: true }); fs.rmSync(path.join(logDir(), 'app.old.log'), { force: true }); } catch {}
-}, 180000);
+try { fs.rmSync(path.join(app.getPath('userData'), 'logs'), { recursive: true, force: true }); } catch {}
 const rl = new Map(); // key -> {n, t0, supp, tag}
 function logRL(tag, msg) { // выводы xray/sing-box: убираем шум и схлопываем повторы
   if (/found process path|connection (upload|download) (finished|closed)/i.test(msg)) return;
@@ -586,6 +570,7 @@ async function startSingbox(level) {
   log('sing-box', 'TUN запущен'); logAdapters('tun');
 }
 async function stopAll(reason) {
+  if (/упал/.test(reason || '')) ksOn(); else if (reason !== 'ошибка' && reason !== 'ошибка переключения') ksOff();
   stopping = true;
   for (const p of [sb, xray]) { if (p) { try { p.removeAllListeners('exit'); p.kill(); } catch {} } }
   const had = !!(sb || xray);
@@ -731,14 +716,41 @@ h('subs', listSubs);
 h('setsub', setSub);
 h('setrpc', async en => { setRpc(!!en); return true; });
 h('rpcinfo', async () => ({ configured: !!RPC.clientId, connected: rpcReady }));
-const lk = k => (k === 'c' ? 'c' : 'x');
-h('logs', async k => logBuf[lk(k)].slice(-500).join('\n') || 'Пока пусто (автоочистка каждые 3 минуты)');
-h('copylogs', async k => { clipboard.writeText(logBuf[lk(k)].join('\n')); return true; });
-h('clearlogs', async k => { k = lk(k); logBuf[k].length = 0; pend[k].length = 0; try { fs.rmSync(path.join(logDir(), LOGF[k]), { force: true }); } catch {} return true; });
-h('openlogs', async () => { fs.mkdirSync(logDir(), { recursive: true }); return shell.openPath(logDir()); });
-h('diag', diag);
 
 if (!app.requestSingleInstanceLock()) app.quit();
+
+// ---- Kill Switch: при неожиданном обрыве VPN блокируем исходящий трафик (брандмауэр Windows) ----
+const setFile = () => path.join(app.getPath('userData'), 'settings.json');
+const setLoad = () => { try { return JSON.parse(fs.readFileSync(setFile(), 'utf8')); } catch { return {}; } };
+const setSave = o => { try { fs.writeFileSync(setFile(), JSON.stringify(o)); } catch {} };
+const ksMark = () => path.join(app.getPath('userData'), 'ks-active');
+let ksActive = false;
+const psq = s => "'" + String(s).replace(/'/g, "''") + "'";
+function psRun(script) { execFileSync('powershell', ['-NoProfile', '-NonInteractive', '-Command', script], { windowsHide: true, stdio: 'pipe', timeout: 20000 }); }
+function ksOn() {
+  if (ksActive || !setLoad().ks) return;
+  try {
+    const apps = [process.execPath, path.join(binDir(), 'xray.exe'), path.join(binDir(), 'sing-box.exe')];
+    const g = "'MikaelaVPN-KS'";
+    let s = "$ErrorActionPreference='Stop';Get-NetFirewallRule -Group " + g + " -ErrorAction SilentlyContinue | Remove-NetFirewallRule;";
+    apps.forEach((p, i) => { s += `New-NetFirewallRule -DisplayName 'Mikaela KS app ${i}' -Group ${g} -Direction Outbound -Action Allow -Program ${psq(p)} -Profile Any | Out-Null;`; });
+    s += `New-NetFirewallRule -DisplayName 'Mikaela KS dns udp' -Group ${g} -Direction Outbound -Action Allow -Service Dnscache -Protocol UDP -RemotePort 53 -Profile Any | Out-Null;`;
+    s += `New-NetFirewallRule -DisplayName 'Mikaela KS dns tcp' -Group ${g} -Direction Outbound -Action Allow -Service Dnscache -Protocol TCP -RemotePort 53 -Profile Any | Out-Null;`;
+    s += `New-NetFirewallRule -DisplayName 'Mikaela KS dhcp' -Group ${g} -Direction Outbound -Action Allow -Service Dhcp -Protocol UDP -RemotePort 67 -Profile Any | Out-Null;`;
+    s += "Set-NetFirewallProfile -All -DefaultOutboundAction Block";
+    psRun(s); ksActive = true; try { fs.writeFileSync(ksMark(), '1'); } catch {}
+    log('app', 'Kill Switch: интернет заблокирован до повторного подключения');
+  } catch (e) { log('app', 'Kill Switch не включился: ' + String(e.stderr || e.message).slice(0, 200)); }
+}
+function ksOff(force) {
+  if (!ksActive && !force) return;
+  try { psRun("Set-NetFirewallProfile -All -DefaultOutboundAction Allow;Get-NetFirewallRule -Group 'MikaelaVPN-KS' -ErrorAction SilentlyContinue | Remove-NetFirewallRule"); }
+  catch (e) { log('app', 'Kill Switch: не удалось снять блокировку: ' + String(e.stderr || e.message).slice(0, 200)); return; }
+  ksActive = false; try { fs.unlinkSync(ksMark()); } catch {}
+  log('app', 'Kill Switch: блокировка снята');
+}
+h('ksget', async () => ({ on: !!setLoad().ks, active: ksActive }));
+h('ksset', async v => { const s = setLoad(); s.ks = !!v; setSave(s); if (!v) ksOff(); return { on: !!v }; });
 
 // ---- способы входа (подтягиваются из кабинета) ----
 async function authOpts() {
@@ -847,6 +859,7 @@ h('updinstall', async () => { if (updater && upd.state === 'ready') { try { if (
 
 app.whenReady().then(() => {
   load(); loadDisk(); proxyOffSync(); killOrphans();
+  if (fs.existsSync(ksMark())) { try { ksOff(true); } catch {} }
   log('app', `запуск ${app.getName()} ${app.getVersion()}, Windows ${os.release()}, bin: ${binDir()}`);
   win = new BrowserWindow({
     width: 440, height: 820, show: !START_HIDDEN, resizable: false, autoHideMenuBar: true, backgroundColor: '#111111',
@@ -856,5 +869,5 @@ app.whenReady().then(() => {
   if (START_HIDDEN) win.once('ready-to-show', () => { win.showInactive(); win.minimize(); });
   initUpdater();
 });
-app.on('before-quit', () => { try { if (rpcSock) rpcSock.destroy(); } catch {} for (const p of [sb, xray]) { try { if (p) p.kill(); } catch {} } });
+app.on('before-quit', () => { try { ksOff(); } catch {} try { if (rpcSock) rpcSock.destroy(); } catch {} for (const p of [sb, xray]) { try { if (p) p.kill(); } catch {} } });
 app.on('window-all-closed', () => app.quit());
