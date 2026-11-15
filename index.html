@@ -50,7 +50,6 @@ input,select{width:100%;padding:14px;margin-top:12px;border-radius:12px;border:1
 input:focus{border-color:var(--bh)}select.s{width:auto;margin:0;padding:6px 10px;border-radius:10px;font-size:13px}
 .pwf{position:relative}.pwf button{position:absolute;right:6px;top:19px;border:0;background:none;color:var(--t2);font:inherit;font-size:12px;cursor:pointer;padding:6px 10px}
 a{color:var(--ib);font-size:13px;cursor:pointer;text-decoration:underline;text-decoration-color:var(--bd)}
-#logBox{width:100%;height:190px;margin-top:12px;padding:14px;border-radius:12px;border:1px solid var(--bd);background:var(--tm);color:var(--t2);font:11px/1.6 'JetBrains Mono',Consolas,monospace;white-space:pre;overflow:auto;resize:none;-webkit-user-select:text;user-select:text}
 .sec{margin-top:30px}.sec .hdr{display:flex;align-items:center;justify-content:space-between;font-size:14px;color:var(--t2)}
 nav{position:absolute;bottom:0;left:0;right:0;height:72px;display:flex;background:var(--bg);border-top:1px solid var(--dv);z-index:5}
 nav button{flex:1;border:0;background:none;color:var(--t3);font:inherit;font-size:11px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;cursor:pointer;transition:color .2s}
@@ -77,6 +76,7 @@ nav button.act{color:var(--tx)}
 .stp .num{font-size:40px;font-weight:300;min-width:56px;text-align:center}
 .ctr{text-align:center}
 .rit{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 0;border-bottom:1px solid var(--dv);font-size:14px}.rit .t2{font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.rit button{border:0;background:none;color:var(--t2);font-size:18px;cursor:pointer;padding:0 6px}.rit button:hover{color:var(--er)}.empty{font-size:13px;color:var(--t3);padding:8px 0}
+.bk{border:0;background:none;color:var(--t2);font:inherit;font-size:14px;cursor:pointer;padding:0;margin-bottom:6px}.bk:hover{color:var(--tx)}
 </style></head><body>
 
 <div id="login" class="screen">
@@ -138,29 +138,48 @@ nav button.act{color:var(--tx)}
   </section>
 
   <section id="pSet" class="hide">
-    <h1 class="h1">Настройки</h1>
-    <p class="sub" style="display:block">Параметры приложения и журнал xray</p>
-    <div class="sec"><div class="hdr">Тема<select id="themeSel" class="s"><option value="system">Как в системе</option><option value="light">Белая</option><option value="gray">Серая</option><option value="dark">Чёрная</option></select></div></div>
-    <div class="sec"><div class="hdr">Автообновление серверов<select id="autoSel" class="s"><option value="60000">каждую минуту</option><option value="300000">каждые 5 минут</option><option value="3600000">раз в час</option></select></div>
-      <div class="meta">Новые хосты из панели появятся в списке без перезапуска</div></div>
-    <div class="sec"><div class="hdr">Версия <span id="verTxt" class="meta" style="margin:0"></span></div><div class="meta" id="updHint"></div></div>
-    <div class="sec"><div class="hdr">Автозапуск с Windows<button class="btn sm" id="asSw" style="width:auto;padding:6px 14px"></button></div>
-      <div class="hdr" style="margin-top:14px">Запускать свёрнутым<button class="btn sm" id="amSw" style="width:auto;padding:6px 14px"></button></div>
-      <div class="hdr" style="margin-top:14px">Автоподключение<button class="btn sm" id="acSw" style="width:auto;padding:6px 14px"></button></div>
-      <div class="meta" id="asHint"></div></div>
-    <div class="sec"><div class="hdr">Маршрутизация<select id="rtMode" class="s"><option value="bypass">Всё через VPN, кроме списка</option><option value="only">Только список через VPN</option></select></div>
-      <div class="meta" id="rtHint"></div>
-      <div class="lbl" style="margin:18px 0 4px">Приложения</div><div id="rtApps"></div>
+    <div id="sMain">
+      <h1 class="h1">Настройки</h1>
+      <p class="sub" style="display:block">Параметры приложения</p>
+      <div class="sec"><div class="hdr">Тема<select id="themeSel" class="s"><option value="system">Как в системе</option><option value="light">Белая</option><option value="gray">Серая</option><option value="dark">Чёрная</option></select></div></div>
+      <div class="sec"><div class="hdr">Автообновление серверов<select id="autoSel" class="s"><option value="60000">каждую минуту</option><option value="300000">каждые 5 минут</option><option value="3600000">раз в час</option></select></div>
+        <div class="meta">Новые хосты из панели появятся в списке без перезапуска</div></div>
+      <div class="sec"><div class="hdr">Версия <span id="verTxt" class="meta" style="margin:0"></span></div><div class="meta" id="updHint"></div></div>
+      <button class="btn between" data-sp="sAdv" style="margin-top:30px"><span>Дополнительные настройки</span><span class="t2">›</span></button>
+      <button class="btn between" data-sp="sRt"><span>Маршрутизация</span><span class="t2">›</span></button>
+      <div class="sec"><div class="hdr" id="acc">—</div><button class="btn c" id="out">Выйти из аккаунта</button></div>
+    </div>
+    <div id="sAdv" class="hide">
+      <button class="bk" data-sp="sMain">‹ Назад</button>
+      <h1 class="h1">Дополнительные настройки</h1>
+      <div class="sec"><div class="hdr">Автозапуск с Windows<button class="btn sm" id="asSw" style="width:auto;padding:6px 14px"></button></div>
+        <div class="hdr" style="margin-top:16px">Запускать свёрнутым<button class="btn sm" id="amSw" style="width:auto;padding:6px 14px"></button></div>
+        <div class="hdr" style="margin-top:16px">Автоподключение<button class="btn sm" id="acSw" style="width:auto;padding:6px 14px"></button></div>
+        <div class="meta" id="asHint"></div></div>
+      <div class="sec"><div class="hdr">Kill Switch<button class="btn sm" id="ksSw" style="width:auto;padding:6px 14px"></button></div>
+        <div class="meta">Блокировка интернета без VPN: если соединение неожиданно оборвётся, весь трафик будет заблокирован, пока вы не подключитесь снова или не выключите функцию. Снимается при выходе из приложения.</div><div class="meta" id="ksHint"></div></div>
+      <div class="sec"><div class="hdr">Показывать в Discord<button class="btn sm" id="rpcSw" style="width:auto;padding:6px 14px"></button></div><div class="meta" id="rpcHint"></div></div>
+    </div>
+    <div id="sRt" class="hide">
+      <button class="bk" data-sp="sMain">‹ Назад</button>
+      <h1 class="h1">Маршрутизация</h1>
+      <p class="sub" style="display:block">Какие приложения и сайты идут через VPN</p>
+      <div class="sec"><div class="hdr">Режим<select id="rtMode" class="s"><option value="bypass">Всё через VPN, кроме списка</option><option value="only">Только список через VPN</option></select></div><div class="meta" id="rtHint"></div></div>
+      <button class="btn between" data-sp="sRtA" style="margin-top:26px"><span>Маршрутизация приложений</span><span class="t2" id="rtAc">›</span></button>
+      <button class="btn between" data-sp="sRtD"><span>Маршрутизация доменов</span><span class="t2" id="rtDc">›</span></button>
+    </div>
+    <div id="sRtA" class="hide">
+      <button class="bk" data-sp="sRt">‹ Назад</button>
+      <h1 class="h1">Приложения</h1>
+      <div class="rows" id="rtApps"></div>
       <div class="g2"><button class="btn sm" id="rtRun">Из запущенных</button><button class="btn sm" id="rtPick">Выбрать файл…</button></div>
-      <div class="lbl" style="margin:18px 0 4px">Домены</div><div id="rtDoms"></div>
-      <div class="g2" style="grid-template-columns:1fr auto"><input id="rtDom" placeholder="example.com" style="margin:0"><button class="btn sm" id="rtAdd" style="width:auto;padding:0 18px">Добавить</button></div></div>
-    <div class="sec"><div class="hdr">Показывать в Discord<button class="btn sm" id="rpcSw" style="width:auto;padding:6px 14px"></button></div><div class="meta" id="rpcHint"></div></div>
-    <div class="sec"><div class="hdr">Логи<select id="logLevel" class="s"><option value="warning">Обычные</option><option value="info">Подробные</option><option value="debug">Отладка</option></select></div>
-      <div class="seg" id="logTabs"><button data-lg="x" class="act">Xray</button><button data-lg="c">Подписка и кабинет</button></div>
-      <textarea id="logBox" readonly spellcheck="false"></textarea>
-      <div class="g3"><button class="btn sm" id="logRef">Обновить</button><button class="btn sm" id="logCopy">Копировать</button><button class="btn sm" id="logDiag">Диагностика</button></div>
-      <div class="g2"><button class="btn sm" id="logClr">Очистить</button><button class="btn sm" id="logDir">Папка логов</button></div></div>
-    <div class="sec"><div class="hdr" id="acc">—</div><button class="btn c" id="out">Выйти из аккаунта</button></div>
+    </div>
+    <div id="sRtD" class="hide">
+      <button class="bk" data-sp="sRt">‹ Назад</button>
+      <h1 class="h1">Домены</h1>
+      <div class="rows" id="rtDoms"></div>
+      <div class="g2" style="grid-template-columns:1fr auto"><input id="rtDom" placeholder="example.com" style="margin:0"><button class="btn sm" id="rtAdd" style="width:auto;padding:0 18px">Добавить</button></div>
+    </div>
   </section>
   </main>
 
@@ -221,7 +240,7 @@ $('out').onclick=async()=>{await vpn.logout();S.list=[];S.sub=null;S.dev=null;S.
 
 /* навигация / окна */
 function go(p){['pHome','pSrv','pDev','pSet'].forEach(x=>$(x).classList.toggle('hide',x!==p));document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('act',b.dataset.p===p));
-  $('main')&&0;document.querySelector('main').scrollTop=0;if(p==='pSrv'&&!S.list.length)loadServers(false);if(p==='pDev')loadDevices();if(p==='pSet'){loadLogs();renderRpc()}}
+  $('main')&&0;document.querySelector('main').scrollTop=0;if(p==='pSrv'&&!S.list.length)loadServers(false);if(p==='pDev')loadDevices();if(p==='pSet'){setPage('sMain');renderRpc();renderKs()}}
 document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>go(b.dataset.p));$('curSrv').onclick=()=>go('pSrv');$('brand').onclick=()=>go('pHome');
 function ask(text,ok,title){return new Promise(res=>{$('dlgT').textContent=title||'Подтверждение';$('dlgX').textContent=text;$('dlgY').textContent=ok||'Да';$('dlg').classList.remove('hide');
   const f=v=>{$('dlg').classList.add('hide');$('dlgY').onclick=$('dlgN').onclick=null;res(v)};$('dlgY').onclick=()=>f(true);$('dlgN').onclick=()=>f(false)})}
@@ -270,11 +289,11 @@ async function loadServers(force,quiet){if(loading)return;loading=true;$('srvErr
   S.upd=new Date(r.data.at||Date.now()).toLocaleTimeString('ru',{hour:'2-digit',minute:'2-digit'})+(r.data.stale?' · из кэша':'');
   if(quiet&&old&&old!==S.sig)toast('Список серверов обновлён');
   renderServers();renderCur();renderInfo()}
-function renderServers(){$('list').innerHTML=S.list.map((s,i)=>{const p=parse(s.tag),pg=S.ping[s.tag],pt=pg==null?'':pg<0?'—':pg+' мс',meta=s.auto?'Автовыбор':s.proto;
-  return `<button class="srv ${s.tag===S.server?'sel':''}" data-i="${i}">${flag(p.code)}<div class="grow"><div class="n">${esc(p.label)}</div>${s.desc?`<div class="d">${esc(s.desc)}</div>`:''}</div><div class="mt">${esc(meta)}${pt?' · '+pt:''}</div>${s.tag===S.server?'<i class="dotg"></i>':''}</button>`}).join('')||'<div class="t2" style="padding:12px">Нет серверов</div>';
+function renderServers(){$('list').innerHTML=S.list.map((s,i)=>{const p=parse(s.tag),pg=S.ping[s.tag],pt=pg==null?'':pg<0?'—':pg+' мс',col=pg>0?(pg<120?'var(--ok)':pg<250?'#ff9f0a':'var(--er)'):'var(--t2)',pr=s.auto?'Автовыбор':[s.proto,s.net,s.sec].filter(Boolean).join(' / ');
+  return `<button class="srv ${s.tag===S.server?'sel':''}" data-i="${i}">${flag(p.code)}<div class="grow"><div class="n">${esc(p.label)}</div><div class="d">${esc(pr)}</div></div><div class="mt" style="color:${col}">${esc(pt)}</div>${s.tag===S.server?'<i class="dotg"></i>':''}</button>`}).join('')||'<div class="t2" style="padding:12px">Нет серверов</div>';
   document.querySelectorAll('.srv').forEach(el=>el.onclick=()=>pick(S.list[+el.dataset.i].tag))}
 function renderCur(){const s=S.list.find(x=>x.tag===S.server);if(!s){$('curName').textContent='—';return}const p=parse(s.tag),pg=S.ping[s.tag];
-  $('curFlag').innerHTML=flag(p.code);$('curName').textContent=p.label;$('curDesc').textContent=s.desc||'';$('curMeta').textContent=(s.auto?'Автовыбор':s.proto)+(pg>0?' · '+pg+' мс':'')}
+  $('curFlag').innerHTML=flag(p.code);$('curName').textContent=p.label;$('curDesc').textContent=s.desc||'';$('curMeta').textContent=(s.auto?'Автовыбор':[s.proto,s.net,s.sec].filter(Boolean).join(' / '))+(pg>0?' · '+pg+' мс':'')}
 async function pick(t){S.server=t;ls.set('server',t);renderServers();renderCur();if(on)$('hTxt').textContent='Переключаю…';const r=await vpn.pick(t);if(!r.ok)$('err2').textContent=r.error;else toast('Сервер: '+parse(t).label);poll()}
 let pinging=false;$('pingAll').onclick=async()=>{if(pinging)return;pinging=true;$('pingLbl').textContent='Проверка пинга…';S.list.forEach(s=>S.ping[s.tag]=undefined);renderServers();
   const r=await vpn.pingMany(S.list.map(s=>s.tag));if(r.ok)Object.assign(S.ping,r.data);pinging=false;$('pingLbl').textContent='Тест пинга';renderServers();renderCur()};
@@ -385,14 +404,6 @@ setInterval(async()=>{if(!live())return;refreshSub();const m=await vpn.me();if(m
 async function renderRpc(){const r=await vpn.rpcInfo(),i=r.data||{};$('rpcSw').classList.toggle('act',S.rpc);$('rpcSw').textContent=S.rpc?'Вкл':'Выкл';
   $('rpcHint').textContent=!i.configured?'Не задан Discord Application ID (RPC.clientId в main.js)':!S.rpc?'Выключено':i.connected?'Discord подключён':'Ожидаю запуск Discord…'}
 $('rpcSw').onclick=async()=>{S.rpc=!S.rpc;ls.set('rpc',S.rpc?'1':'0');await vpn.setRpc(S.rpc);setTimeout(renderRpc,800);renderRpc()};
-$('logLevel').value=S.logLevel;$('logLevel').onchange=()=>{S.logLevel=$('logLevel').value;ls.set('logLevel',S.logLevel);toast('Уровень логов применится при следующем подключении','var(--t2)')};
-let LK='x';
-document.querySelectorAll('[data-lg]').forEach(b=>b.onclick=()=>{LK=b.dataset.lg;document.querySelectorAll('[data-lg]').forEach(x=>x.classList.toggle('act',x===b));$('logBox').value='';loadLogs()});
-async function loadLogs(){const r=await vpn.logs(LK);if(!r.ok)return;const b=$('logBox'),end=b.scrollTop+b.clientHeight>=b.scrollHeight-30;b.value=r.data;if(end)b.scrollTop=b.scrollHeight}
-$('logRef').onclick=loadLogs;$('logCopy').onclick=async()=>{await vpn.copyLogs(LK);toast('Лог скопирован')};
-$('logClr').onclick=async()=>{await vpn.clearLogs(LK);loadLogs();toast('Лог очищен','var(--t2)')};$('logDir').onclick=()=>vpn.openLogs();
-$('logDiag').onclick=async()=>{$('logDiag').disabled=true;await vpn.diag();$('logDiag').disabled=false;loadLogs();toast('Диагностика завершена')};
-setInterval(()=>{if(live()&&!$('pSet').classList.contains('hide'))loadLogs()},2000);
 init();
 
 /* обновление клиента */
@@ -427,7 +438,7 @@ function applyAO(){const o=AO;const e=o.email;['tabs','em','pwf','go','fgW'].for
 /* маршрутизация */
 let RT={mode:'bypass',apps:[],domains:[]};
 async function loadRoute(){const r=await vpn.routeGet();if(r.ok)RT=r.data;renderRoute()}
-function renderRoute(){$('rtMode').value=RT.mode;
+function renderRoute(){$('rtMode').value=RT.mode;$('rtAc').textContent=(RT.apps.length||'')+' ›';$('rtDc').textContent=(RT.domains.length||'')+' ›';
  $('rtApps').innerHTML=RT.apps.length?RT.apps.map((a,i)=>`<div class="rit"><div class="grow" style="min-width:0"><div>${esc(a.name)}</div>${a.path?`<div class="t2">${esc(a.path)}</div>`:''}</div><button data-da="${i}">×</button></div>`).join(''):'<div class="empty">Список пуст</div>';
  $('rtDoms').innerHTML=RT.domains.length?RT.domains.map((x,i)=>`<div class="rit"><div class="grow">${esc(x)}</div><button data-dd="${i}">×</button></div>`).join(''):'<div class="empty">Список пуст</div>';
  $('rtHint').textContent=RT.mode==='only'?'Через VPN пойдут только приложения и домены из списка, остальное — напрямую':'Приложения и домены из списка пойдут напрямую, минуя VPN';
@@ -445,4 +456,13 @@ $('rtRun').onclick=async()=>{sheet('<h2>Запущенные приложени�
  sheet(`<h2>Запущенные приложения</h2><div class="t2" style="font-size:13px;margin-bottom:6px">Нажмите, чтобы добавить в список</div>${l.map((x,i)=>{const has=RT.apps.some(a=>a.name.toLowerCase()===x.name.toLowerCase());return `<button class="btn between" data-p="${i}" ${has?'disabled':''}><span style="min-width:0"><div>${esc(x.name)}</div><div class="t2" style="font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(x.title)}</div></span><span class="t2">${has?'добавлено':'+'}</span></button>`}).join('')}`);
  document.querySelectorAll('[data-p]').forEach(b=>b.onclick=()=>{RT.apps.push(l[+b.dataset.p]);closeSheet();saveRoute()})};
 setTimeout(loadRoute,400);
+
+/* страницы настроек */
+const SETP=['sMain','sAdv','sRt','sRtA','sRtD'];
+function setPage(id){SETP.forEach(x=>$(x).classList.toggle('hide',x!==id));document.querySelector('main').scrollTop=0}
+document.querySelectorAll('[data-sp]').forEach(b=>b.onclick=()=>setPage(b.dataset.sp));
+async function renderKs(){const r=await vpn.ksGet();S.ks=!!(r.data&&r.data.on);$('ksSw').classList.toggle('act',S.ks);$('ksSw').textContent=S.ks?'Вкл':'Выкл';
+ $('ksHint').textContent=r.data&&r.data.active?'Сейчас интернет заблокирован — подключитесь к VPN':''}
+$('ksSw').onclick=async()=>{if(!S.ks&&!await ask('При обрыве VPN интернет будет заблокирован до повторного подключения. Включить Kill Switch?','Включить'))return;const r=await vpn.ksSet(!S.ks);if(!r.ok)toast(r.error,'var(--er)');renderKs()};
+setInterval(()=>{if(!document.hidden&&!$('pSet').classList.contains('hide'))renderKs()},4000);
 </script></body></html>
