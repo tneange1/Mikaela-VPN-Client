@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, safeStorage, shell, session: ses, net: enet, clipboard, dialog } = require('electron');
+const { app, BrowserWindow, Menu, Tray, nativeImage, ipcMain, safeStorage, shell, session: ses, net: enet, clipboard, dialog } = require('electron');
 const path = require('path'), fs = require('fs'), net = require('net'), os = require('os'), crypto = require('crypto'), dns = require('dns');
 const { spawn, execFileSync, execFile } = require('child_process');
 
@@ -721,6 +721,7 @@ h('setrpc', async en => { setRpc(!!en); return true; });
 h('rpcinfo', async () => ({ configured: !!RPC.clientId, connected: rpcReady }));
 
 if (!app.requestSingleInstanceLock()) app.quit();
+app.on('second-instance', () => showWin());
 
 // ---- Kill Switch: при неожиданном обрыве VPN блокируем исходящий трафик (брандмауэр Windows) ----
 const setFile = () => path.join(app.getPath('userData'), 'settings.json');
@@ -838,6 +839,28 @@ h('autoget', async () => ({ ...autoGet(), packaged: app.isPackaged }));
 h('autoset', async (on, min) => autoSet(on, min));
 const START_HIDDEN = process.argv.includes('--hidden');
 
+// ---- трей: приложение живёт в фоне, закрытие окна только прячет его ----
+let tray = null, quitting = false;
+function showWin() { if (!win) return; if (win.isMinimized()) win.restore(); win.show(); win.focus(); }
+function trayMenu() {
+  const on = !!sb;
+  tray.setToolTip('Mikaela VPN — ' + (on ? 'подключено' : 'отключено'));
+  tray.setContextMenu(Menu.buildFromTemplate([
+    { label: 'Открыть Mikaela VPN', click: showWin },
+    { label: on ? 'Статус: подключено' : 'Статус: отключено', enabled: false },
+    ...(on ? [{ label: 'Отключить', click: () => { serial(() => stopAll('по кнопке'))(); } }] : []),
+    { type: 'separator' },
+    { label: 'Выход', click: () => { quitting = true; app.quit(); } },
+  ]));
+}
+function initTray() {
+  try {
+    tray = new Tray(nativeImage.createFromPath(path.join(__dirname, 'icon.png')).resize({ width: 16, height: 16 }));
+    tray.on('click', showWin);
+    trayMenu(); setInterval(trayMenu, 3000);
+  } catch (e) { log('app', 'трей не создан: ' + e.message); }
+}
+
 // ---- автообновление клиента (electron-updater, GitHub Releases) ----
 let updater = null, upd = { state: 'idle', version: '', percent: 0, error: '' };
 function initUpdater() {
@@ -853,12 +876,12 @@ function initUpdater() {
     updater.on('update-downloaded', i => { upd = { state: 'ready', version: i.version, percent: 100, error: '' }; });
     updater.on('error', e => { upd.state = 'error'; upd.error = String(e && e.message || e).slice(0, 200); });
     const chk = () => updater.checkForUpdates().catch(() => {});
-    setTimeout(chk, 8000); setInterval(chk, 900000);
+    setTimeout(chk, 8000); setInterval(chk, 180000);
   } catch (e) { upd.state = 'off'; log('update', 'не запущено: ' + e.message); }
 }
 h('updinfo', async () => ({ ...upd, current: app.getVersion(), enabled: !!updater }));
 h('updcheck', async () => { if (updater) { try { await updater.checkForUpdates(); } catch {} } return { ...upd, current: app.getVersion(), enabled: !!updater }; });
-h('updinstall', async () => { if (updater && upd.state === 'ready') { try { if (sb) sb.kill(); if (xray) xray.kill(); } catch {} updater.quitAndInstall(true, true); } return {}; });
+h('updinstall', async () => { quitting = true; if (updater && upd.state === 'ready') { try { if (sb) sb.kill(); if (xray) xray.kill(); } catch {} updater.quitAndInstall(true, true); } return {}; });
 
 app.whenReady().then(() => {
   load(); loadDisk(); proxyOffSync(); killOrphans();
@@ -869,8 +892,9 @@ app.whenReady().then(() => {
     icon: path.join(__dirname,'icon.png'), title: 'Mikaela VPN', webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true },
   });
   win.loadFile('index.html');
-  if (START_HIDDEN) win.once('ready-to-show', () => { win.showInactive(); win.minimize(); });
+  win.on('close', e => { if (!quitting) { e.preventDefault(); win.hide(); } });
+  initTray();
   initUpdater();
 });
-app.on('before-quit', () => { try { ksOff(); } catch {} try { if (rpcSock) rpcSock.destroy(); } catch {} for (const p of [sb, xray]) { try { if (p) p.kill(); } catch {} } });
-app.on('window-all-closed', () => app.quit());
+app.on('before-quit', () => { quitting = true; try { ksOff(); } catch {} try { if (rpcSock) rpcSock.destroy(); } catch {} for (const p of [sb, xray]) { try { if (p) p.kill(); } catch {} } });
+app.on('window-all-closed', () => {});
