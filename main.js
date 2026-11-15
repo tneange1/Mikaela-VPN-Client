@@ -639,7 +639,7 @@ async function diag() {
 
 // ===== Discord Rich Presence: реклама проекта =====
 const RPC = {
-  clientId: process.env.MIKAELA_DISCORD_ID || '1571137403509543012',      // <-- вставьте Application ID из discord.com/developers
+  clientId: process.env.MIKAELA_DISCORD_ID || '1571463306009514046',      // <-- вставьте Application ID из discord.com/developers
   largeImage: 'logo',                                   // ключ картинки в Rich Presence → Art Assets
   largeText: 'Mikaela VPN',
   details: 'Быстрый и стабильный VPN',
