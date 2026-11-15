@@ -11,7 +11,7 @@
 [![Downloads](https://img.shields.io/github/downloads/tneange1/Mikaela-VPN-Client/total?style=flat-square&color=0a84ff)](https://github.com/tneange1/Mikaela-VPN-Client/releases)
 ![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-8e8e93?style=flat-square)
 
-[**Скачать**](https://github.com/tneange1/Mikaela-VPN-Client/releases/latest) · [Личный кабинет](https://cabinet.mikaelavpn.xyz) · [Telegram-бот](https://t.me/vpnmikaelabot)
+[**Скачать для Windows**](https://github.com/tneange1/Mikaela-VPN-Client/releases/latest/download/Mikaela-VPN.exe) · [Android](https://github.com/tneange1/Mikaela-VPN-Android/releases/latest/download/Mikaela-VPN.apk) · [Личный кабинет](https://cabinet.mikaelavpn.xyz) · [Telegram-бот](https://t.me/vpnmikaelabot)
 
 </div>
 
@@ -37,7 +37,7 @@
 
 ## Установка
 
-1. Скачайте `Mikaela-VPN-Setup-x.y.z.exe` из [последнего релиза](https://github.com/tneange1/Mikaela-VPN-Client/releases/latest).
+1. Скачайте [`Mikaela-VPN.exe`](https://github.com/tneange1/Mikaela-VPN-Client/releases/latest/download/Mikaela-VPN.exe) (ссылка всегда ведёт на последнюю версию).
 2. Запустите установщик. Приложению нужны права администратора: оно создаёт виртуальный сетевой адаптер.
 3. Войдите в аккаунт, выберите сервер и нажмите кнопку питания.
 
@@ -80,7 +80,7 @@
 **Выпуск версии**
 1. Закоммитьте изменения в `main`.
 2. Releases → *Draft a new release* → создайте тег вида `v1.2.3` → *Publish*.
-3. Actions соберёт установщик и прикрепит к релизу `Mikaela-VPN-Setup-1.2.3.exe` и `latest.yml`. Версия берётся из тега.
+3. Actions соберёт установщик и прикрепит к релизу `Mikaela-VPN.exe` и `latest.yml`. Версия берётся из тега.
 4. Установленные клиенты увидят релиз и предложат обновиться.
 
 Обычный push в `main` только собирает файл для скачивания в артефактах.
@@ -124,7 +124,7 @@ Get-NetFirewallRule -Group 'MikaelaVPN-KS' | Remove-NetFirewallRule
 
 ## Планы
 
-- [ ] Приложение для Android
+- [x] Приложение для Android ([Mikaela-VPN-Android](https://github.com/tneange1/Mikaela-VPN-Android))
 - [ ] Подпись сборки сертификатом
 - [ ] Значок в трее
 
