@@ -1,3 +1,5 @@
+> **Проект переехал:** https://github.com/tneange1/Mikaela-VPN-Windows. Новые версии выходят там, приложение обновится само.
+
  <div align="center">
 
 <img src="logo.png" width="96" alt="Mikaela VPN">
@@ -8,7 +10,7 @@
 
 На базе Xray-core и sing-box
 
-[**⬇ Скачать для Windows (.exe)**](https://github.com/tneange1/Mikaela-VPN-Client/releases/latest/download/Mikaela-VPN.exe)
+[**⬇ Скачать для Windows (.exe)**](https://github.com/tneange1/Mikaela-VPN-Windows/releases/latest/download/Mikaela-VPN.exe)
 
 [Android APK](https://github.com/tneange1/Mikaela-VPN-Android/releases/latest/download/Mikaela-VPN.apk) · [Личный кабинет](https://cabinet.mikaelavpn.xyz/) · [Telegram-бот](https://t.me/vpnmikaelabot)
 

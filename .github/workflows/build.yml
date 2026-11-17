@@ -36,15 +36,22 @@ jobs:
           $t = "${{ github.ref_name }}"
           if ($t -like 'v*') { npm version $t.Substring(1) --no-git-tag-version --allow-same-version }
       - run: npm install
-      - name: Build (publish only on tag v*)
+      # Репозиторий переехал: в приложение зашит адрес НОВОГО репозитория (package.json -> publish),
+      # поэтому после этого обновления клиенты ищут апдейты уже там.
+      # Сам установщик публикуем здесь, чтобы старые версии (которые смотрят сюда) смогли обновиться.
+      - name: Build
         shell: pwsh
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          if ("${{ github.ref }}".StartsWith("refs/tags/v")) { npx electron-builder --win --x64 --publish always }
-          else { npx electron-builder --win --x64 --publish never }
+        run: npx electron-builder --win --x64 --publish never
       - uses: actions/upload-artifact@v4
         with:
           name: Mikaela-VPN-win
           path: dist/*.exe
           if-no-files-found: error
+      - name: Release (old clients update from here once)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/Mikaela-VPN.exe
+            dist/Mikaela-VPN.exe.blockmap
+            dist/latest.yml
