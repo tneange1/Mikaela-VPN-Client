@@ -17,3 +17,8 @@
 [Личный кабинет](https://cabinet.mikaelavpn.xyz/)  ·  [Telegram-бот](https://t.me/vpnmikaelabot)
 
 </div>
+
+
+## Расширение для Chrome
+
+Исходники, тексты для магазина и политика конфиденциальности: [chrome/](chrome/). Политика: [PRIVACY.md](chrome/PRIVACY.md).

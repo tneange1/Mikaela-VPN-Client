@@ -1,0 +1,6 @@
+{
+  "version": 1,
+  "servers": [
+    { "id": "REPLACE-1", "name": "REPLACE: название", "code": "FI", "scheme": "https", "host": "REPLACE.example.com", "port": 8443, "username": "REPLACE", "password": "REPLACE" }
+  ]
+}
